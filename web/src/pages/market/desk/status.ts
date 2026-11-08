@@ -35,7 +35,11 @@ export function bidBadge(b: MyBidRow): Badge {
   return { label: b.status, cls: 'gray' };
 }
 
-export function offerBadge(o: OfferListItem): Badge {
+// 参数按实消费收窄（v6.82.0 第 5 批 R-WEB 适配）：offerBadge 只读 status / myTurn 两字段——
+// 契约第 5 批把 OfferDetailResponse.offer 拆为 Omit<OfferListItem,'counterpart'>（详情端点从不
+// 下发 counterpart，api 手抄的继承字段是谎言），谈判桌传入的 detail.offer 因此不再满足
+// OfferListItem 全形。本函数从不读 counterpart，收窄参数后列表行与详情行都能传，零运行时变化。
+export function offerBadge(o: Pick<OfferListItem, 'status' | 'myTurn'>): Badge {
   if (o.status === 'pending' && o.myTurn) return { label: '待你回应', cls: 'gold' };
   if (o.status === 'pending') return { label: '等对方', cls: 'sky' };
   if (o.status === 'intent') return { label: '意向单·等开窗', cls: 'gold' };

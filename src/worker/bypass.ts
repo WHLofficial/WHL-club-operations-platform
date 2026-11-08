@@ -21,6 +21,13 @@ import {
   transferEvidence,
   type ReviewDecision,
 } from './transfers.ts';
+// 契约类型锚点（v6.82.0 第 5 批）：旁路回执四型以 src/contract/batch5.ts 为唯一真源——
+// 同名内部接口删除定义改 import 契约（同批 3 naming-ops 做法），createRcChange / createTermination /
+// cancelOwnTransfer / createFreeAgent 的 return 标注即写侧编译期锁。FieldDiff 处置见契约型注
+// （freeRcChange 从响应删除——免费通道只落 evidence 供审核豁免，HTTP 响应从不携带；ok 字面 true）。
+import type { CancelOwnResult, FreeAgentResult, RcChangeResult, TerminationResult } from '../contract/batch5.ts';
+
+export type { CancelOwnResult, FreeAgentResult, RcChangeResult, TerminationResult };
 import { assertExpectedWageReady, openNegotiationSession, voidSigningCore, type OpenSessionOptions } from './negotiations.ts';
 import { findActiveNegotiationSession, findActivePromotionSession } from './negotiation-guard.ts';
 import { listingDemandStatements } from './demand-ops.ts';
@@ -217,14 +224,8 @@ export async function createBypassTransfer(
 }
 
 // ---- 续约（规则 4.4.6 合同期内更改违约金；平台展示名「续约」） ----
-
-export interface RcChangeResult {
-  ok: true;
-  transferId: number;
-  oldReleaseFee: number;
-  newReleaseFee: number;
-  changeFee: number;
-}
+// RcChangeResult 形状真源 = 契约 batch5.ts（本文件 import + re-export；注意 HTTP 响应不带
+// freeRcChange，免费通道只写进 evidence.freeRcChange 供审核侧豁免扣款）。
 
 export async function createRcChange(
   env: Env,
@@ -335,12 +336,7 @@ export async function createRcChange(
 }
 
 // ---- 解约（规则 4.4.4） ----
-
-export interface TerminationResult {
-  ok: true;
-  transferId: number;
-  terminationFee: number;
-}
+// TerminationResult 形状真源 = 契约 batch5.ts（本文件 import + re-export）。
 
 export async function createTermination(
   env: Env,
@@ -451,10 +447,7 @@ export async function createTermination(
 
 const CANCELLABLE_TYPES: ReadonlySet<string> = new Set(['rc_change', 'termination', 'promotion']);
 
-export interface CancelOwnResult {
-  ok: true;
-  status: 'cancelled' | 'rejected';
-}
+// CancelOwnResult 形状真源 = 契约 batch5.ts（本文件 import + re-export）。
 
 /**
  * 教练自助取消自己发起的单据：
@@ -519,13 +512,7 @@ export async function cancelOwnTransfer(env: Env, clubId: number, actor: number,
 }
 
 // ---- 海捞（规则 4.4.3：签入自由球员，签入费 = 新违约金 × 30%，新 RC 不设上下限） ----
-
-export interface FreeAgentResult {
-  ok: true;
-  transferId: number;
-  newReleaseFee: number;
-  signFee: number;
-}
+// FreeAgentResult 形状真源 = 契约 batch5.ts（本文件 import + re-export）。
 
 export async function createFreeAgent(
   env: Env,

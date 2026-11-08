@@ -17,6 +17,19 @@ import {
   setOfferSettings,
 } from '../offers.ts';
 import { sqlDisplayName } from '../../core/player-name.ts';
+// 契约类型锚点（v6.82.0 第 5 批）：本文件全部响应装配点的 c.json 泛型以 src/contract/batch5.ts
+// 为真源锁装配（写侧编译期锁）。列表/详情行接口的 status / turn 从 DB 字符串收窄为契约联合：
+// offers.status 写集恒为六枚（契约 OfferStatus 型注）、turn 恒 buyer/seller（offers 表无其他写者）。
+import type {
+  OfferAcceptResult,
+  OfferCounterResult,
+  OfferDetailResponse,
+  OfferOkResult,
+  OfferPlaceResult,
+  OfferSettingsDto,
+  OfferStatus,
+  OffersListResponse,
+} from '../../contract/batch5.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -38,8 +51,8 @@ interface OfferListRow {
   init_amount: number;
   round: number;
   note: string | null;
-  status: string;
-  turn: string;
+  status: OfferStatus;
+  turn: 'buyer' | 'seller';
   listing_id: number | null;
   created_at: string;
   updated_at: string;
@@ -101,7 +114,7 @@ app.get('/offers', async (c) => {
   const intentsMineRow = ((intentScan.results ?? []) as { n: number }[])[0];
 
   const last = rows.results[rows.results.length - 1];
-  return c.json({
+  return c.json<OffersListResponse>({
     club: { id: club.id, name: club.name },
     box,
     items: rows.results.map((r) => ({
@@ -136,8 +149,8 @@ interface OfferDetailRow {
   init_amount: number;
   round: number;
   note: string | null;
-  status: string;
-  turn: string;
+  status: OfferStatus;
+  turn: 'buyer' | 'seller';
   hold_id: number | null;
   listing_id: number | null;
   season: number | null;
@@ -198,7 +211,7 @@ app.get('/offers/:id', async (c) => {
     actor_name: string | null;
   }[];
 
-  return c.json({
+  return c.json<OfferDetailResponse>({
     offer: {
       id: r.id,
       player: { id: r.player_id, fcId: r.player_fc_id, name: r.player_name, position: r.position, ca: r.ca, pa: r.pa, listPrice: r.list_price },
@@ -252,7 +265,7 @@ app.post('/offers', async (c) => {
     amount,
     note: typeof body.note === 'string' ? body.note : null,
   });
-  return c.json({ ok: true, offerId: out.offerId, status: out.status, auto: out.auto }, 201);
+  return c.json<OfferPlaceResult>({ ok: true, offerId: out.offerId, status: out.status, auto: out.auto }, 201);
 });
 
 // POST /api/offers/:id/counter —— 还价 {amount, note}
@@ -269,7 +282,7 @@ app.post('/offers/:id/counter', async (c) => {
   if (!Number.isFinite(amount)) throw new HttpError(400, '还价金额不对（单位 m）');
   // v6.40.2：动作前先真结算（这单可能刚好过期 / 球员刚被挂牌）
   await settleOverdue(c.env, { origin: 'user' });
-  return c.json(
+  return c.json<OfferCounterResult>(
     await counterOffer(c.env, {
       offerId,
       clubId: club.id,
@@ -290,7 +303,7 @@ app.post('/offers/:id/accept', async (c) => {
   if (!Number.isInteger(offerId) || offerId <= 0) throw new HttpError(400, '报价 ID 不对');
   // v6.40.2：动作前先真结算（这单可能刚好过期；同意挂牌前先让过期单收口）
   await settleOverdue(c.env, { origin: 'user' });
-  return c.json(await acceptOffer(c.env, { offerId, clubId: club.id, actor: user.id }));
+  return c.json<OfferAcceptResult>(await acceptOffer(c.env, { offerId, clubId: club.id, actor: user.id }));
 });
 
 // POST /api/offers/:id/reject —— 拒绝（卖方）
@@ -302,7 +315,7 @@ app.post('/offers/:id/reject', async (c) => {
   if (!Number.isInteger(offerId) || offerId <= 0) throw new HttpError(400, '报价 ID 不对');
   // v6.40.2：动作前先真结算（这单可能刚好过期）
   await settleOverdue(c.env, { origin: 'user' });
-  return c.json(await rejectOffer(c.env, { offerId, clubId: club.id, actor: user.id }));
+  return c.json<OfferOkResult>(await rejectOffer(c.env, { offerId, clubId: club.id, actor: user.id }));
 });
 
 // POST /api/offers/:id/withdraw —— 撤回（买方）
@@ -314,7 +327,7 @@ app.post('/offers/:id/withdraw', async (c) => {
   if (!Number.isInteger(offerId) || offerId <= 0) throw new HttpError(400, '报价 ID 不对');
   // v6.40.2：动作前先真结算（这单可能刚好过期 / 已谈成，撤回要被拒）
   await settleOverdue(c.env, { origin: 'user' });
-  return c.json(await withdrawOffer(c.env, { offerId, clubId: club.id, actor: user.id }));
+  return c.json<OfferOkResult>(await withdrawOffer(c.env, { offerId, clubId: club.id, actor: user.id }));
 });
 
 // PUT /api/players/:id/offer-settings —— 报价设置（设计 §2.1 + v6.4.0 解耦 + v6.33.0 标价，仅本队教练）
@@ -350,7 +363,7 @@ app.put('/players/:id/offer-settings', async (c) => {
     offerAuto: body.offerAuto === true,
     notForSale: body.notForSale,
   });
-  return c.json(out);
+  return c.json<OfferSettingsDto>(out);
 });
 
 // GET /api/players/:id/offer-settings —— 设置面板的私密预填源（v6.33.0）：详情端点走公开缓存
@@ -379,7 +392,7 @@ app.get('/players/:id/offer-settings', async (c) => {
   if (!p || p.club_id !== club.id) throw new HttpError(404, '球员不存在或不在你的队里');
   if (p.status === 'listed') throw new HttpError(409, '这名球员在转会区挂牌中，报价设置先锁定，下架后再改');
   if (p.status !== 'normal') throw new HttpError(400, '当前状态改不了报价设置');
-  return c.json({
+  return c.json<OfferSettingsDto>({
     transferListed: p.transfer_listed === 1,
     minOfferPrice: p.min_offer_price,
     listPrice: p.list_price,

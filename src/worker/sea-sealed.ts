@@ -22,9 +22,38 @@ import { seaVerdicts } from './player-flow-state.ts';
 import { loadOpsRows, loadWindowRef, saveOpsRow } from './ops-schedule.ts';
 import { queueClubNotification } from './notify.ts';
 import type { ExpiryOpts } from './expiry-ops.ts';
+// 契约类型锚点（v6.82.0 第 5 批）：教练侧阶段视图 / 出标回执与管理端视图十型以
+// src/contract/batch5.ts 为唯一真源——同名类型删除定义改 import 契约（同批 3 naming-ops 做法），
+// loadSeaPhaseView / submitSealedBid / openSeaBatch / cancelSeaBatch / loadSeaAdminView 的
+// return 标注即写侧编译期锁。worker 内部类型（SeaBatchRow / SeaBidRow / SeaPhaseInfo，snake_case
+// 库行）不下发，留本文件不动。
+import type {
+  SeaAdminBidRow,
+  SeaAdminView,
+  SeaBatchDto,
+  SeaBatchStatus,
+  SeaBidDto,
+  SeaBidStatus,
+  SeaCancelResult,
+  SeaOpenSummary,
+  SeaPhaseView,
+  SeaSubmitResult,
+  SeaWinnerDto,
+} from '../contract/batch5.ts';
 
-export type SeaBatchStatus = 'sealed' | 'settling' | 'opened' | 'cancelled';
-export type SeaBidStatus = 'sealed' | 'won' | 'lost' | 'void' | 'withdrawn';
+export type {
+  SeaAdminBidRow,
+  SeaAdminView,
+  SeaBatchDto,
+  SeaBatchStatus,
+  SeaBidDto,
+  SeaBidStatus,
+  SeaCancelResult,
+  SeaOpenSummary,
+  SeaPhaseView,
+  SeaSubmitResult,
+  SeaWinnerDto,
+};
 
 export interface SeaBatchRow {
   id: number;
@@ -123,43 +152,8 @@ export async function findBatch(db: D1Database, season: number, windowSeq: numbe
 }
 
 // ---- 教练侧读接口（阶段 + 我的标 + 公示） ----
-
-export interface SeaBidDto {
-  playerId: number;
-  playerName: string;
-  /** 保密：只有出标方自己看得到金额；开标胜出后随公示公开 */
-  newReleaseFee: number;
-  status: SeaBidStatus;
-  voidReason: string;
-  updatedAt: string | null;
-}
-
-export interface SeaWinnerDto {
-  playerId: number;
-  playerName: string;
-  clubId: number;
-  clubName: string;
-  amount: number;
-}
-
-export interface SeaPhaseView {
-  enabled: boolean;
-  /** off = 未启用；none = 不在暗标段；sealed = 收标中；closing = 已截止等开标；open = 已开标（看公示，明标段走常规海捞） */
-  state: 'off' | 'none' | 'sealed' | 'closing' | 'open';
-  batch: {
-    id: number;
-    season: number;
-    windowSeq: number;
-    status: SeaBatchStatus;
-    sealedAt: string | null;
-    deadlineAt: string;
-    openedAt: string | null;
-  } | null;
-  /** 我在本批次的标（只有自己可见） */
-  myBids: SeaBidDto[];
-  /** 最近一次开标的公示（谁以多少胜出） */
-  results: SeaWinnerDto[];
-}
+// SeaBidDto / SeaWinnerDto / SeaPhaseView（batch 内联形状已抽为契约 SeaBatchDto）形状真源 =
+// 契约 batch5.ts（本文件 import + re-export）。
 
 export async function loadSeaPhaseView(env: Env, clubId: number): Promise<SeaPhaseView> {
   const db = env.DB;
@@ -260,16 +254,7 @@ async function loadResults(db: D1Database, window: OpenWindow | null): Promise<S
 }
 
 // ---- 提交 / 改标 / 撤回 ----
-
-export interface SeaSubmitResult {
-  ok: true;
-  bidId: number;
-  playerId: number;
-  newReleaseFee: number;
-  signFee: number;
-  /** 本次是改标（原冻结已刷新）还是首标 */
-  updated: boolean;
-}
+// SeaSubmitResult 形状真源 = 契约 batch5.ts（本文件 import + re-export）。
 
 async function requireOpenBatch(env: Env): Promise<{ batch: SeaBatchRow; win: OpenWindow }> {
   const phase = await loadSeaPhase(env);
@@ -453,15 +438,7 @@ export async function withdrawSealedBid(env: Env, clubId: number, actor: number,
 }
 
 // ---- 开标（到点 / 关窗 / 管理端立即） ----
-
-export interface SeaOpenSummary {
-  ok: true;
-  batchId: number;
-  already: boolean;
-  won: number;
-  lost: number;
-  voided: number;
-}
+// SeaOpenSummary 形状真源 = 契约 batch5.ts（本文件 import + re-export）。
 
 interface BidWithPlayer extends SeaBidRow {
   player_name: string;
@@ -737,27 +714,9 @@ export async function remindDueSeaBatches(env: Env, opts: ExpiryOpts): Promise<n
 }
 
 // ---- 管理端（立即开标 / 延长 / 取消 + 逐标明账） ----
-
-export interface SeaAdminBidRow {
-  bidId: number;
-  playerId: number;
-  playerName: string;
-  clubId: number;
-  clubName: string;
-  newReleaseFee: number;
-  status: SeaBidStatus;
-  holdStatus: string | null;
-  voidReason: string;
-  submittedAt: string | null;
-  updatedAt: string | null;
-}
-
-export interface SeaAdminView {
-  enabled: boolean;
-  batch: (SeaPhaseView['batch'] & { note: string; remindedAt: string }) | null;
-  bids: SeaAdminBidRow[];
-  summary: { players: number; bids: number; clubs: number; top: number };
-}
+// SeaAdminBidRow / SeaAdminView（batch = 契约 SeaBatchDto & {note, remindedAt}）形状真源 =
+// 契约 batch5.ts（本文件 import + re-export）；SeaExtendResult 的路由层映射在
+// routes/admin/sea-sealed.ts（白名单外，锚点待落登记）。
 
 export async function loadSeaAdminView(env: Env): Promise<SeaAdminView> {
   const db = env.DB;
@@ -906,7 +865,7 @@ export async function cancelSeaBatch(
   origin: AuditOrigin,
   note: string,
   reason = '批次已被管理组取消',
-): Promise<{ ok: true; voided: number }> {
+): Promise<SeaCancelResult> {
   const db = env.DB;
   const claim = await db
     .prepare(`UPDATE sea_batches SET status = 'cancelled', note = ?, opened_by = ?, opened_at = ${nowSql()} WHERE id = ? AND status = 'sealed'`)
@@ -950,7 +909,7 @@ export async function cancelCurrentBatch(
   actor: number | null,
   batchIdInput?: unknown,
   noteInput?: unknown,
-): Promise<{ ok: true; voided: number }> {
+): Promise<SeaCancelResult> {
   const batch = await requireBatchForAdmin(env, batchIdInput);
   const note = typeof noteInput === 'string' && noteInput.trim() !== '' ? noteInput.trim().slice(0, 200) : '管理组取消本窗暗标批次';
   // 管理组写的说明同时当「标作废的原因」发给出标方——教练看到的是人话，不是内部代号

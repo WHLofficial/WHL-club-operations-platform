@@ -28,6 +28,16 @@ import { sqlDisplayName } from '../core/player-name.ts';
 import { rollbackRcChangeForPlayer } from './bypass.ts';
 import { ACTIVE_LISTING_STATES_SQL } from './player-flow-state.ts';
 import { loadMarketContext } from './market-context.ts';
+// 契约类型锚点（v6.82.0 第 5 批）：报价设置与五个动作回执以 src/contract/batch5.ts 为唯一真源，
+// placeOffer / counterOffer / acceptOffer / rejectOffer / withdrawOffer / setOfferSettings 的
+// return 标注即写侧编译期锁。placeOffer 本体不含 ok（路由层补包装），故标 Omit<OfferPlaceResult,'ok'>。
+import type {
+  OfferAcceptResult,
+  OfferCounterResult,
+  OfferOkResult,
+  OfferPlaceResult,
+  OfferSettingsDto,
+} from '../contract/batch5.ts';
 
 function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
@@ -117,7 +127,7 @@ export interface PlaceOfferInput {
 export async function placeOffer(
   env: Env,
   input: PlaceOfferInput,
-): Promise<{ offerId: number; status: string; auto: 'auto_accept' | 'auto_reject' | null }> {
+): Promise<Omit<OfferPlaceResult, 'ok'>> {
   const db = env.DB;
   // v6.29.0：关窗期也能报价——win 为空时 season/window_seq 落 NULL（「未归窗」）；
   // 关窗期被同意会转成意向单，等开窗卖方点确认时再把窗口写回来。
@@ -272,7 +282,7 @@ export async function placeOffer(
 export async function counterOffer(
   env: Env,
   input: { offerId: number; clubId: number; actor: number; amount: number; note?: string | null },
-): Promise<{ ok: true; amount: number; turn: OfferTurn }> {
+): Promise<OfferCounterResult> {
   const db = env.DB;
   const offer = await loadOffer(db, input.offerId);
   const role = roleOf(offer, input.clubId);
@@ -631,7 +641,7 @@ async function notifyIntentCreated(env: Env, offer: OfferContextRow): Promise<vo
 export async function acceptOffer(
   env: Env,
   input: { offerId: number; clubId: number; actor: number },
-): Promise<{ ok: true; status: 'accepted' | 'intent'; listingId: number | null }> {
+): Promise<OfferAcceptResult> {
   const db = env.DB;
   const offer = await loadOffer(db, input.offerId);
   const role = roleOf(offer, input.clubId);
@@ -805,7 +815,7 @@ export async function rollbackGhostOffer(env: Env, offer: OfferRow, actor: numbe
 }
 
 /** 卖方拒绝（pending 任意轮次都能拒；关窗期的 intent 则是「放弃」，设计 §3 + v6.29.0） */
-export async function rejectOffer(env: Env, input: { offerId: number; clubId: number; actor: number }): Promise<{ ok: true }> {
+export async function rejectOffer(env: Env, input: { offerId: number; clubId: number; actor: number }): Promise<OfferOkResult> {
   const db = env.DB;
   const offer = await loadOffer(db, input.offerId);
   const role = roleOf(offer, input.clubId);
@@ -833,7 +843,7 @@ export async function rejectOffer(env: Env, input: { offerId: number; clubId: nu
 }
 
 /** 买方撤回（pending 期间随时可撤；intent 同样可撤，v6.29.0） */
-export async function withdrawOffer(env: Env, input: { offerId: number; clubId: number; actor: number }): Promise<{ ok: true }> {
+export async function withdrawOffer(env: Env, input: { offerId: number; clubId: number; actor: number }): Promise<OfferOkResult> {
   const db = env.DB;
   const offer = await loadOffer(db, input.offerId);
   const role = roleOf(offer, input.clubId);
@@ -1073,16 +1083,7 @@ export async function setOfferSettings(
     offerAuto: boolean;
     notForSale: boolean;
   },
-): Promise<{
-  ok: true;
-  transferListed: boolean;
-  minOfferPrice: number | null;
-  listPrice: number | null;
-  offerAuto: boolean;
-  notForSale: boolean;
-  /** 标价低于最低报价被自动对齐的回执（v6.55.0）：from=库中旧最低报价（无旧值 null），to=对齐后的最低报价 */
-  minOfferPriceAdjusted: { from: number | null; to: number } | null;
-}> {
+): Promise<OfferSettingsDto> {
   const db = env.DB;
   const p = await db
     .prepare(

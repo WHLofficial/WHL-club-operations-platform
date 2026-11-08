@@ -5,8 +5,8 @@
 // ocrMatchEntry 的返回类型需要本地绑定，其余类型仅 re-export、不进本文件作用域
 // （第 1 批 batch1.ts 的本地绑定随 PlayerDetail 手抄删除一并撤销，只走 re-export）。
 import type { MatchOcrResult, NumberConflict, SquadIssue } from '../../../src/contract/batch2.ts';
-// （批 4 的 MatchPhase / MatchDecisionResult 按测试计划 §6.0 归属表让渡给 B6 / B5，
-// api 手抄原地保留，见 MatchPhase 定义处注。）
+// （批 4 的 MatchPhase 按测试计划 §6.0 归属表让渡给 B6，api 手抄原地保留，见 MatchPhase 定义处注；
+// MatchDecisionResult 已随第 5 批迁 src/contract/batch5.ts。）
 
 // ---- 契约 re-export 区（真源 src/contract/，web 只转发不手抄）----
 // 第 1 批（v6.82.0）：workbench + demand（转会台聚合 + 球员要求收件箱），23 型 + P2 补抄
@@ -251,6 +251,52 @@ export type {
   WindowRow,
   WindowsResponse,
 } from '../../../src/contract/batch4.ts';
+// 第 5 批（v6.82.0）：sea / offer / negotiation / transfer——报价设置、报价 / 议价列表详情与
+// 五个动作回执（P2 补具名四型 + CancelOwnResult）、谈判会话与三个动作回执、旁路转会回执四型、
+// 匹配决定、海捞情报两型与暗标段全域十型。字段跟随 worker c.json 载荷现实，甄别与 FieldDiff
+// 处置见契约型注（RcChangeResult.freeRcChange 从响应删除、四型 ok 收窄 true、offer.season/
+// windowSeq 加 null、TransferType 补 'activation'、OfferSettingsDto.ok 补抄、随批补甄别三处：
+// ReleaseFeeResult/TraineeSignResult.ok 收窄、OfferDetailResponse 拆 Omit<…,'counterpart'>、
+// OfferEventRow.actor.name 放宽 null）。DeskTab.tsx「本次免费」死分支删除是全六批唯一 web
+// 运行时改动（恒假分支从未渲染，测试计划 §6.5 B5 验收①）。
+export type {
+  CancelOwnResult,
+  FreeAgentResult,
+  MatchDecisionResult,
+  MyNegotiations,
+  NegotiationSession,
+  OfferAcceptResult,
+  OfferCounterResult,
+  OfferDetailResponse,
+  OfferEventRow,
+  OfferListItem,
+  OfferOkResult,
+  OfferPlaceResult,
+  OfferResult,
+  OfferSettingsDto,
+  OfferStatus,
+  OffersListResponse,
+  RcChangeResult,
+  ReleaseFeeResult,
+  SeaAdminBidRow,
+  SeaAdminView,
+  SeaBatchDto,
+  SeaBatchStatus,
+  SeaBidDto,
+  SeaBidStatus,
+  SeaCancelResult,
+  SeaCompRow,
+  SeaComps,
+  SeaExtendResult,
+  SeaOpenSummary,
+  SeaPhaseView,
+  SeaSignEligibility,
+  SeaSubmitResult,
+  SeaWinnerDto,
+  TerminationResult,
+  TraineeSignResult,
+  TransferType,
+} from '../../../src/contract/batch5.ts';
 
 export interface MeUser {
   id: number;
@@ -373,45 +419,9 @@ export function mediaUrl(key: string | null | undefined): string | null {
 // 球队页阵容小字走独立的 /api/club/pending-contracts，不污染公开缓存）。
 // ContractPendingView / ContractAppliedNotice / PlayerDemandState 已迁 src/contract/batch1.ts（v6.82.0 第 1 批）。
 
-/** 报价设置（GET/PUT /api/players/:id/offer-settings，v6.33.0）：设置面板的私密预填源 */
-export interface OfferSettingsDto {
-  transferListed: boolean;
-  /** 私密最低报价（全系统私密，仅本队教练经本端点可见） */
-  minOfferPrice: number | null;
-  /** 公开标价（进转会名单必填，其他队可见） */
-  listPrice: number | null;
-  offerAuto: boolean;
-  notForSale: boolean;
-  /** 标价低于最低报价被自动对齐的回执（v6.55.0，仅 PUT 返回）：from=库中旧最低报价（首挂无旧值 null），to=对齐后的最低报价 */
-  minOfferPriceAdjusted?: { from: number | null; to: number } | null;
-}
-
-/** 海捞资格判定（v6.17.0） */
-export interface SeaSignEligibility {
-  eligible: boolean;
-  /** 不可海捞的原因（后端原文）；可签时为 null */
-  reason: string | null;
-}
-
-/** 海捞成交参照行（v6.17.0） */
-export interface SeaCompRow {
-  playerId: number;
-  playerName: string;
-  playerCa: number | null;
-  fromClubName: string | null;
-  toClubName: string | null;
-  newReleaseFee: number | null;
-  signFee: number | null;
-  season: number | null;
-  windowSeq: number | null;
-  completedAt: string | null;
-}
-
-export interface SeaComps {
-  /** same_tier=同档成交（CA±5）；global=同档空时回落全局最近；none=没有参照 */
-  scope: 'same_tier' | 'global' | 'none';
-  rows: SeaCompRow[];
-}
+// OfferSettingsDto / SeaSignEligibility / SeaCompRow / SeaComps 已迁 src/contract/batch5.ts
+// （v6.82.0 第 5 批；OfferSettingsDto.ok 按 workerExtra 补抄可选——仅 PUT 回、GET 不回——
+// 处置见契约型注），本文件只 re-export（见顶部契约 re-export 区）。
 
 // ---- v0.7.1 d8：球员库（公开 /api/players，keyset 游标分页）----
 // PlayerLibraryRow / LastDealInfo / PlayersLibraryResponse 已迁 src/contract/batch2.ts。
@@ -539,77 +549,14 @@ export interface MyBidRow {
 // 五张在途表一次取全：Workbench* 九型已迁 src/contract/batch1.ts（v6.82.0 第 1 批，
 // worker 内部名 ↔ 契约名别名对应见契约文件）。
 
-/** 转会单类型（与 src/worker 侧 transfer.type 取值一致；v6.67.0 由 string 收紧为联合类型） */
-export type TransferType =
-  | 'transfer'
-  | 'free_agent'
-  | 'match'
-  | 'forced_auction'
-  | 'rc_change'
-  | 'promotion'
-  | 'termination';
-
-export interface NegotiationSession {
-  id: number;
-  transferId: number;
-  status: 'active' | 'settled' | 'cancelled';
-  transfer: { type: TransferType; status: string; fee: number | null };
-  fromClubName: string | null;
-  toClubName: string | null;
-  player: { id: number; fcId: number | null; name: string; position: string | null; age: number | null; ca: number | null; pa: number | null };
-  agentTier: number;
-  agentTierLabel: string;
-  releaseFee: number | null;
-  rcBounds: [number, number] | null;
-  expectedWage: number | null;
-  attemptsUsed: number;
-  remaining: number;
-  // v6.65.2：静默作废时刻（后端按 anchor + negotiation_silence_hours 算好），卡头倒计时用
-  expiresAt: string | null;
-  lastSatisfaction: string | null;
-  lastRisk: boolean;
-  attempts: { attemptNo: number; offeredWage: number; result: string; at: string; feedback: string | null }[];
-  settled: { wage: number | null; source: string; message: string } | null;
-  // v6.65.4 已结束区：结束时间 / 结局 / 作废原因（进行中的会话三项都是 null，attempts 也只给进行中）
-  endedAt: string | null;
-  outcome: 'signed' | 'void' | null;
-  voidReason: string | null;
-}
-
-// GET /api/negotiations?mine=1 的响应（v6.65.4 起进行中与已结束分开）：
-// sessions = 进行中全量；ended = 已结束一页（默认 10 条，按结束时间倒序）；endedNextBefore = 下一页游标
-export interface MyNegotiations {
-  sessions: NegotiationSession[];
-  ended: NegotiationSession[];
-  endedNextBefore: number | null;
-}
+// TransferType / NegotiationSession / MyNegotiations / ReleaseFeeResult / OfferResult /
+// TraineeSignResult 已迁 src/contract/batch5.ts（v6.82.0 第 5 批；TransferType 补 'activation'
+// 成员、ReleaseFeeResult / TraineeSignResult 的 ok 随批按 worker 字面量收窄 true、OfferResult
+// ← worker OfferOutcome 的 naming 处置见契约型注），本文件只 re-export（见顶部契约 re-export 区）。
 
 // 工资预览（v6.40.0）：POST /api/negotiations/:sessionId/preview 的响应。只读——不落库、不耗轮次、
 // 不写审计。WageForecast 已迁 src/contract/batch1.ts（v6.82.0 第 1 批，E 类双用：签约谈判
 // preview 与 demand 还价档位 preview 同形合一，见契约型注）。
-
-export interface ReleaseFeeResult {
-  ok: boolean;
-  releaseFee: number;
-  expectedWage: number;
-}
-
-export interface OfferResult {
-  result: 'success' | 'fail' | 'direct' | 'forced';
-  attemptNo: number;
-  remaining: number;
-  wage?: number;
-  satisfaction?: string;
-  risk?: boolean;
-  message?: string;
-}
-
-export interface TraineeSignResult {
-  ok: boolean;
-  result: 'trainee';
-  wage: number;
-  message: string;
-}
 
 // ---- v6.54.0 球员要求（闹涨薪）：GET /api/club/contract-demands ----
 // 收件箱八型已迁 src/contract/batch1.ts（v6.82.0 第 1 批；worker 内部名 DemandCard /
@@ -739,40 +686,12 @@ export interface ActivatableResponse {
   players: ActivatablePlayer[];
 }
 
-export interface RcChangeResult {
-  ok: boolean;
-  transferId: number;
-  oldReleaseFee: number;
-  newReleaseFee: number;
-  changeFee: number;
-  /** v6.62.0 §5.6：本次走了免费通道（提价免差额、保护期不变；降价也置 true） */
-  freeRcChange?: boolean;
-}
-
-export interface TerminationResult {
-  ok: boolean;
-  transferId: number;
-  terminationFee: number;
-}
-
-export interface FreeAgentResult {
-  ok: boolean;
-  transferId: number;
-  newReleaseFee: number;
-  signFee: number;
-}
-
-// MatchDecisionResult 未随第 4 批迁移：测试计划 §6.0 归属表固定归 B5（真源 activations.ts:185-190，
-// ok: true 收窄也随 B5 落），手抄原地保留。WindowRow / WindowsResponse / OpenWindowResult /
-// CloseWindowResult 已迁 src/contract/batch4.ts（v6.82.0 第 4 批；Open/Close 五处 workerExtra
-// 补抄的处置见契约型注），本文件只 re-export。
-
-export interface MatchDecisionResult {
-  ok: boolean;
-  decision: 'match' | 'pass';
-  newReleaseFee?: number;
-  diff?: number;
-}
+// RcChangeResult / TerminationResult / FreeAgentResult / MatchDecisionResult 已迁
+// src/contract/batch5.ts（v6.82.0 第 5 批；RcChangeResult.freeRcChange 按 workerMissing 删——
+// 响应从不携带该键，免费通道只落 evidence 供审核豁免，web DeskTab.tsx 的恒假死分支随批删除；
+// 四型 ok 按 worker 字面量收窄 true。处置见契约型注），本文件只 re-export。
+// WindowRow / WindowsResponse / OpenWindowResult / CloseWindowResult 已迁 src/contract/batch4.ts
+// （v6.82.0 第 4 批；Open/Close 五处 workerExtra 补抄的处置见契约型注），本文件只 re-export。
 
 /** 强制拍卖人选参考值（v6.51.0：队内非门将 CA 前六只作参考，不再强制） */
 export interface ForcedAuctionReference {
@@ -978,55 +897,11 @@ export async function ocrMatchEntry(matchId: number, imageBase64: string, side?:
 
 // ---- v6.3.0：报价 / 议价（/api/offers，全部私有） ----
 
-// v6.29.0：intent = 意向单（关窗期双方谈成，资金继续冻结；开窗后由卖方确认才物化挂牌）
-export type OfferStatus = 'pending' | 'intent' | 'accepted' | 'rejected' | 'withdrawn' | 'expired';
-
-export interface OfferListItem {
-  id: number;
-  player: { id: number; fcId: number | null; name: string; position: string | null; ca: number | null; pa: number | null; listPrice: number | null };
-  counterpart: { id: number; name: string };
-  role: 'buyer' | 'seller';
-  amount: number;
-  initAmount: number;
-  round: number;
-  note: string | null;
-  status: OfferStatus;
-  turn: 'buyer' | 'seller';
-  myTurn: boolean;
-  listingId: number | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface OffersListResponse {
-  club: { id: number; name: string };
-  box: 'in' | 'out';
-  items: OfferListItem[];
-  nextCursor: string | null;
-  /** 轮到我表态的条数（球员页「我收到的报价」入口徽标用） */
-  pendingMine: number;
-  /** v6.29.0：我是卖方、等我确认挂牌（或放弃）的意向单条数 */
-  intentsMine: number;
-}
-
-export interface OfferEventRow {
-  kind: string;
-  amount: number | null;
-  note: string | null;
-  at: string;
-  actor: { id: number; name: string } | null;
-}
-
-export interface OfferDetailResponse {
-  offer: OfferListItem & {
-    buyerClub: { id: number; name: string };
-    sellerClub: { id: number; name: string };
-    season: number;
-    windowSeq: number;
-    resolvedAt: string | null;
-  };
-  events: OfferEventRow[];
-}
+// OfferStatus / OfferListItem / OffersListResponse / OfferEventRow / OfferDetailResponse 及
+// P2 补具名的五个动作回执（OfferPlaceResult / OfferCounterResult / OfferAcceptResult /
+// OfferOkResult / CancelOwnResult）已迁 src/contract/batch5.ts（v6.82.0 第 5 批；offer.season /
+// windowSeq 加 null、详情拆 Omit<…,'counterpart'>、events actor.name 放宽 null——随批补甄别
+// 三处与 FieldDiff 处置见契约型注），本文件只 re-export（见顶部契约 re-export 区）。
 
 /* ---------- 运营时刻表（v6.49.0） ---------- */
 // OpsStartAnchor / OpsEndAnchor / OpsState / OpsStatusRow / OpsScheduleView / OpsSaveResult
@@ -1035,95 +910,7 @@ export interface OfferDetailResponse {
 
 /* ---------- 海捞两阶段·暗标段（v6.50.0） ---------- */
 
-export type SeaBatchStatus = 'sealed' | 'settling' | 'opened' | 'cancelled';
-export type SeaBidStatus = 'sealed' | 'won' | 'lost' | 'void' | 'withdrawn';
-
-/** 我的密封标（金额保密：只有出标方自己看得到；开标胜出后随公示公开） */
-export interface SeaBidDto {
-  playerId: number;
-  playerName: string;
-  newReleaseFee: number;
-  status: SeaBidStatus;
-  voidReason: string;
-  updatedAt: string | null;
-}
-
-/** 开标公示行（谁以多少胜出） */
-export interface SeaWinnerDto {
-  playerId: number;
-  playerName: string;
-  clubId: number;
-  clubName: string;
-  amount: number;
-}
-
-export interface SeaBatchDto {
-  id: number;
-  season: number;
-  windowSeq: number;
-  status: SeaBatchStatus;
-  sealedAt: string | null;
-  deadlineAt: string;
-  openedAt: string | null;
-}
-
-/** GET /api/transfers/sea-sealed：state off=未启用 / none=不在暗标段 / sealed=收标中 / closing=已截止等开标 / open=已开标 */
-export interface SeaPhaseView {
-  enabled: boolean;
-  state: 'off' | 'none' | 'sealed' | 'closing' | 'open';
-  batch: SeaBatchDto | null;
-  myBids: SeaBidDto[];
-  results: SeaWinnerDto[];
-}
-
-export interface SeaSubmitResult {
-  ok: true;
-  bidId: number;
-  playerId: number;
-  newReleaseFee: number;
-  signFee: number;
-  /** 本次是改标（原冻结已刷新）还是首标 */
-  updated: boolean;
-}
-
-export interface SeaOpenSummary {
-  ok: true;
-  batchId: number;
-  already: boolean;
-  won: number;
-  lost: number;
-  voided: number;
-}
-
-export interface SeaExtendResult {
-  ok: true;
-  batch: { id: number; season: number; windowSeq: number; status: SeaBatchStatus; deadlineAt: string; note: string };
-}
-
-/** 取消本窗批次：全部标作废 + 冻结解冻 */
-export interface SeaCancelResult {
-  ok: true;
-  voided: number;
-}
-
-export interface SeaAdminBidRow {
-  bidId: number;
-  playerId: number;
-  playerName: string;
-  clubId: number;
-  clubName: string;
-  newReleaseFee: number;
-  status: SeaBidStatus;
-  holdStatus: string | null;
-  voidReason: string;
-  submittedAt: string | null;
-  updatedAt: string | null;
-}
-
-/** GET /api/admin/sea-sealed：逐标明账（管理端看得到金额与出标方，教练侧看不到） */
-export interface SeaAdminView {
-  enabled: boolean;
-  batch: (SeaBatchDto & { note: string; remindedAt: string }) | null;
-  bids: SeaAdminBidRow[];
-  summary: { players: number; bids: number; clubs: number; top: number };
-}
+// SeaBatchStatus / SeaBidStatus / SeaBidDto / SeaWinnerDto / SeaBatchDto / SeaPhaseView /
+// SeaSubmitResult / SeaOpenSummary / SeaExtendResult / SeaCancelResult / SeaAdminBidRow /
+// SeaAdminView 已迁 src/contract/batch5.ts（v6.82.0 第 5 批；两联合与 worker sea-sealed.ts:26-27
+// 逐字同值，处置见契约型注），本文件只 re-export（见顶部契约 re-export 区）。

@@ -635,14 +635,14 @@ function BypassSection({ squad, onRefresh }: { squad: SquadOverview; onRefresh: 
         playerId: rcPlayer.id,
         newReleaseFee: Number(newFee),
       });
+      // v6.82.0 第 5 批（契约 FieldDiff #1，C 处置）：删除「本次免费」两死分支——worker 的
+      // rc-change 响应从不携带 freeRcChange（免费通道只落 evidence 供审核豁免扣款），该分支
+      // 因 `res.freeRcChange === true` 恒假而从未渲染，删除对可见行为零变化（免费提示语义由
+      // evidence→审核豁免链路承接，与本 toast 无关；行为锁 DeskTab.rc-change.test.tsx）。
       show(
-        res.freeRcChange === true
-          ? res.newReleaseFee > res.oldReleaseFee
-            ? `续约申请已提交：${rcPlayer.name} 违约金 ${res.oldReleaseFee.toFixed(2)} → ${res.newReleaseFee.toFixed(2)}m，本次免费：提价不收差额，保护期不变。`
-            : `续约申请已提交：${rcPlayer.name} 违约金 ${res.oldReleaseFee.toFixed(2)} → ${res.newReleaseFee.toFixed(2)}m，本次免费：降价不收费，保护期不变。`
-          : res.changeFee > 0
-            ? `续约申请已提交：${rcPlayer.name} 违约金 ${res.oldReleaseFee.toFixed(2)} → ${res.newReleaseFee.toFixed(2)}m，加价部分 30% 共 ${res.changeFee.toFixed(2)}m 待审核时收，保护期在本窗关闭时结束。`
-            : `续约申请已提交：${rcPlayer.name} 违约金 ${res.oldReleaseFee.toFixed(2)} → ${res.newReleaseFee.toFixed(2)}m，降价免费，保护期在本窗关闭时结束。`,
+        res.changeFee > 0
+          ? `续约申请已提交：${rcPlayer.name} 违约金 ${res.oldReleaseFee.toFixed(2)} → ${res.newReleaseFee.toFixed(2)}m，加价部分 30% 共 ${res.changeFee.toFixed(2)}m 待审核时收，保护期在本窗关闭时结束。`
+          : `续约申请已提交：${rcPlayer.name} 违约金 ${res.oldReleaseFee.toFixed(2)} → ${res.newReleaseFee.toFixed(2)}m，降价免费，保护期在本窗关闭时结束。`,
       );
       setRcPlayerId('');
       setNewFee('');
