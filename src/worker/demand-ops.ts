@@ -28,6 +28,17 @@
 // （INSERT…SELECT…WHERE），终局 claim UPDATE 放批末并以 meta.changes 判 409——并发抢行时
 // 输家整批成为 no-op（守卫在本批求值时读到的已是赢家提交后的状态），不产生半套后果。
 import type { Env } from './env.ts';
+// 契约类型锚点（v6.82.0 第 1 批）：收件箱 / 还价 / 接受 / 预览 / 存续申请 / 待生效变更六个
+// 下发面以 src/contract/batch1.ts 为真源锁装配（甄别 naming 别名：worker 内部名 DemandCard /
+// ClubDemandInbox / PendingContractView 等不动，见各接口注释）。
+import type {
+  ContractPendingView as ContractPendingViewDto,
+  ContractDemandInbox as ContractDemandInboxDto,
+  DemandCounterResult as DemandCounterResultDto,
+  DemandAcceptResult as DemandAcceptResultDto,
+  TransferRequestList as TransferRequestListDto,
+  WageForecast as WageForecastDto,
+} from '../contract/batch1.ts';
 import { HttpError } from '../lib/http.ts';
 import { createAuditStatement, type AuditOrigin } from '../lib/audit.ts';
 import { createConfigService } from '../core/config.ts';
@@ -793,7 +804,7 @@ export interface CounterDemandResult {
  * round], 21)，同请求返回）；本函数负责：守卫 → 判定 → 同批落 attempts / 终局后果 / claim。
  * 判定接受也只写 pending 变更（成交值 c），contracts 关窗前不动（§5.7）。
  */
-export async function counterDemand(env: Env, input: CounterDemandInput): Promise<CounterDemandResult> {
+export async function counterDemand(env: Env, input: CounterDemandInput): Promise<DemandCounterResultDto> {
   const db = env.DB;
   const nowIso = new Date().toISOString();
   const row = await loadDemandRow(db, input.demandId);
@@ -991,7 +1002,7 @@ export interface AcceptDemandResult {
 }
 
 /** 接受 target + rc_floor：写 pending 变更（source='demand'、rc_fee=0），不收费、不走同队转会。 */
-export async function acceptDemand(env: Env, input: AcceptDemandInput): Promise<AcceptDemandResult> {
+export async function acceptDemand(env: Env, input: AcceptDemandInput): Promise<DemandAcceptResultDto> {
   const db = env.DB;
   const nowIso = new Date().toISOString();
   const row = await loadDemandRow(db, input.demandId);
@@ -1668,7 +1679,7 @@ async function wageCapOf(env: Env, clubId: number): Promise<number | null> {
  * 收件箱三组 + wageContext（§7 GET）。只读本俱乐部（club_id 圈定，不跨俱乐部）；
  * void（离队作废）不出本表——作废发生在球员离队之后，教练经站内信与审计面看（§10.4 的澄清）。
  */
-export async function listClubDemands(env: Env, clubId: number): Promise<ClubDemandInbox> {
+export async function listClubDemands(env: Env, clubId: number): Promise<ContractDemandInboxDto> {
   const db = env.DB;
   const win = await getOpenWindow(db);
 
@@ -1806,7 +1817,7 @@ export interface DemandPreviewResult {
  * successRate(−9, 0.8)；c ≥ target 恒成、c < floor 恒 lowball（档位分别 1/0）。
  * 预览与真实提交只差判定 roll 那一下——预览说一套、提交落地另一套是禁手（§6.10-2 同源纪律）。
  */
-export async function previewDemand(env: Env, demandId: number, clubId: number, wageInput: unknown): Promise<DemandPreviewResult> {
+export async function previewDemand(env: Env, demandId: number, clubId: number, wageInput: unknown): Promise<WageForecastDto> {
   const db = env.DB;
   const row = await loadDemandRow(db, demandId);
   if (row === null) throw new HttpError(404, '没有这条涨薪要求');
@@ -1924,7 +1935,7 @@ function toPendingView(r: PendingViewRow): PendingContractView {
  * 本俱乐部的全部待生效合同变更（阵容页小字 / 注册工作台第二行与投影段）。
  * 一条查询、按 player_id 归并；`pending` 每球员最多 1 条（部分唯一索引）。
  */
-export async function loadClubPendingChanges(env: Env, clubId: number): Promise<PendingContractView[]> {
+export async function loadClubPendingChanges(env: Env, clubId: number): Promise<ContractPendingViewDto[]> {
   const rows = (
     await env.DB.prepare(`${PENDING_VIEW_SELECT}
        WHERE pc.club_id = ? AND pc.status = 'pending'
@@ -1938,7 +1949,7 @@ export async function loadPlayerPendingChange(
   env: Env,
   playerId: number,
   clubId: number,
-): Promise<PendingContractView | null> {
+): Promise<ContractPendingViewDto | null> {
   const row = await env.DB.prepare(`${PENDING_VIEW_SELECT}
        WHERE pc.player_id = ? AND pc.club_id = ? AND pc.status = 'pending'`)
     .bind(playerId, clubId)
@@ -2100,7 +2111,7 @@ export async function loadPlayerContractState(env: Env, playerId: number, clubId
  * 本俱乐部的存续转会申请（§7）。released 一并返回：直拒档的「不满」徽章以它为载体
  * （存续直到重签/离队，§5.4），教练必须能看到它挂着；resolved=已关闭（重签/离队/成交收口）不进列表。
  */
-export async function listClubTransferRequests(env: Env, clubId: number): Promise<ClubTransferRequestList> {
+export async function listClubTransferRequests(env: Env, clubId: number): Promise<TransferRequestListDto> {
   const rows = (
     await env.DB
       .prepare(

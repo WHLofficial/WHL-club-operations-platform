@@ -22,6 +22,16 @@ import {
   previewDemand,
   rejectDemand,
 } from '../demand-ops.ts';
+// 契约类型锚点（v6.82.0 第 1 批）：六个端点的响应以 src/contract/batch1.ts 为真源锁装配
+// （c.json 泛型 = 写侧编译期锁；reject 的 RejectDemandResult 不在第 1 批契约清单，暂不标）。
+import type {
+  ContractDemandInbox as ContractDemandInboxDto,
+  DemandAcceptResult as DemandAcceptResultDto,
+  DemandCounterResult as DemandCounterResultDto,
+  PendingContractsResponse as PendingContractsResponseDto,
+  TransferRequestList as TransferRequestListDto,
+  WageForecast as WageForecastDto,
+} from '../../contract/batch1.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -45,19 +55,21 @@ function demandIdOf(c: { req: { param(name: string): string } }): number {
 // 新鲜度由前端 TanStack Query 写后精确 invalidate 承担（前端步骤接线）。
 app.get('/club/contract-demands', async (c) => {
   const { clubId } = await requireCoachClub(c.env, c.req.raw);
-  return c.json(await listClubDemands(c.env, clubId));
+  return c.json<ContractDemandInboxDto>(await listClubDemands(c.env, clubId));
 });
 
 app.post('/club/contract-demands/:id/accept', async (c) => {
   const { user, clubId } = await requireCoachClub(c.env, c.req.raw);
-  return c.json(await acceptDemand(c.env, { demandId: demandIdOf(c), clubId, actor: user.id, origin: 'user' }));
+  return c.json<DemandAcceptResultDto>(
+    await acceptDemand(c.env, { demandId: demandIdOf(c), clubId, actor: user.id, origin: 'user' }),
+  );
 });
 
 app.post('/club/contract-demands/:id/counter', async (c) => {
   const { user, clubId } = await requireCoachClub(c.env, c.req.raw);
   const body = (await c.req.raw.json().catch(() => null)) as { wage?: unknown } | null;
   // 只认 body.wage；混进来的 playerId/targetWage 等字段一律忽略（§7：不接受客户端传 player_id/target_wage）
-  return c.json(
+  return c.json<DemandCounterResultDto>(
     await counterDemand(c.env, {
       demandId: demandIdOf(c),
       clubId,
@@ -71,7 +83,7 @@ app.post('/club/contract-demands/:id/counter', async (c) => {
 app.post('/club/contract-demands/:id/preview', async (c) => {
   const { clubId } = await requireCoachClub(c.env, c.req.raw);
   const body = (await c.req.raw.json().catch(() => null)) as { wage?: unknown } | null;
-  return c.json(await previewDemand(c.env, demandIdOf(c), clubId, body?.wage));
+  return c.json<WageForecastDto>(await previewDemand(c.env, demandIdOf(c), clubId, body?.wage));
 });
 
 app.post('/club/contract-demands/:id/reject', async (c) => {
@@ -81,7 +93,7 @@ app.post('/club/contract-demands/:id/reject', async (c) => {
 
 app.get('/club/transfer-requests', async (c) => {
   const { clubId } = await requireCoachClub(c.env, c.req.raw);
-  return c.json(await listClubTransferRequests(c.env, clubId));
+  return c.json<TransferRequestListDto>(await listClubTransferRequests(c.env, clubId));
 });
 
 // GET /api/club/pending-contracts —— 本队待生效合同变更（v6.54.0 步骤 7，球队页阵容小字的数据源）。
@@ -92,7 +104,7 @@ app.get('/club/transfer-requests', async (c) => {
 // 前端只在「查看的正是自己的队」时才请求（SquadTab 的 own 开关）。
 app.get('/club/pending-contracts', async (c) => {
   const { clubId } = await requireCoachClub(c.env, c.req.raw);
-  return c.json({ pending: await loadClubPendingChanges(c.env, clubId) });
+  return c.json<PendingContractsResponseDto>({ pending: await loadClubPendingChanges(c.env, clubId) });
 });
 
 export default app;

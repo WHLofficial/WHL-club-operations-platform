@@ -1,6 +1,41 @@
-// API 约定（附录 A）：错误统一 {error, code?}；前端消费的 DTO 在此层冻结
+// API 约定（附录 A）：错误统一 {error, code?}。跨端 DTO 契约的唯一真源在 src/contract/
+// （v6.82.0 起按批迁移）：本文件对已迁移类型只做 re-export（见下方「契约 re-export 区」），
+// 不得手抄；尚未迁移的 DTO 暂留本层，后续批次迁入契约。
 import type { PlayerMarker } from '../../../src/core/squad-rules.ts';
 import type { NotifyCategoryId, NotifyRef } from '../../../src/core/notify-meta.ts';
+// 第 1 批契约（真源 src/contract/batch1.ts，v6.82.0）：PlayerDetail 的三个内嵌引用需要本地绑定，
+// 其余类型仅 re-export、不进本文件作用域。
+import type { ContractAppliedNotice, ContractPendingView, PlayerDemandState } from '../../../src/contract/batch1.ts';
+
+// ---- 契约 re-export 区（真源 src/contract/，web 只转发不手抄）----
+// 第 1 批（v6.82.0）：workbench + demand（转会台聚合 + 球员要求收件箱），23 型 + P2 补抄
+// WorkbenchProofResponse。字段跟随 worker c.json 载荷现实，甄别与 FieldDiff 处置见契约型注。
+export type {
+  ContractAppliedNotice,
+  ContractDemandAttempt,
+  ContractDemandCard,
+  ContractDemandInbox,
+  ContractPendingView,
+  DemandAcceptResult,
+  DemandCounterResult,
+  DemandWageContext,
+  DeskSummary,
+  PendingContractsResponse,
+  PlayerDemandState,
+  TransferPanelResponse,
+  TransferRequestCard,
+  TransferRequestList,
+  WageForecast,
+  WorkbenchBidRow,
+  WorkbenchForcedRow,
+  WorkbenchInFlight,
+  WorkbenchListingRow,
+  WorkbenchProofResponse,
+  WorkbenchSearchHit,
+  WorkbenchSearchResult,
+  WorkbenchSessionRow,
+  WorkbenchTransferRow,
+} from '../../../src/contract/batch1.ts';
 
 export interface MeUser {
   id: number;
@@ -338,56 +373,7 @@ export interface ContractDto {
 // ---- v6.54.0 步骤 7：双版本合同（设计 §10.4） ----
 // 只对本队教练下发（GET /api/players/:id 与 /api/club/squad 都按会话判归属；
 // 球队页阵容小字走独立的 /api/club/pending-contracts，不污染公开缓存）。
-
-export interface ContractPendingView {
-  playerId: number;
-  playerName: string | null;
-  /** demand=球员要求 / renewal=普通续约 / rejection=直拒后的保护期调整 */
-  source: 'demand' | 'renewal' | 'rejection';
-  demandId: number | null;
-  /** 现行合同旧值 */
-  wageCurrent: number;
-  releaseFeeCurrent: number | null;
-  protectionTicksCurrent: number | null;
-  /** 关窗后的新值；releaseFee / protectionTicks 为 null = 该项不变 */
-  wage: number;
-  releaseFee: number | null;
-  protectionTicks: number | null;
-  effectiveWindowSeq: number;
-  rcFee: number;
-  freeRcChange: boolean;
-}
-
-/** 已生效态（§10.4）：生效后首个窗口内顶部一行小字，下一窗消失；直拒档不产生 */
-export interface ContractAppliedNotice {
-  source: ContractPendingView['source'];
-  appliedAt: string;
-  /** 只有球员要求来源存了旧工资；普通续约审批单不存 ⇒ null */
-  oldWage: number | null;
-}
-
-export interface PlayerDemandState {
-  window: { season: number; windowSeq: number } | null;
-  demand: {
-    id: number;
-    status: string;
-    resolution: string | null;
-    currentWage: number;
-    targetWage: number;
-    floorWage: number;
-    rcCurrent: number;
-    rcFloor: number;
-    round: number;
-    maxRounds: number;
-    expiresAt: string;
-    appliedAt: string | null;
-    /** 最近一轮还价（SideOps「上轮你出 X 未成」）；没有还价记录 null */
-    lastCounterWage: number | null;
-  } | null;
-  /** 本窗任意状态（含 expired / void 占位）是否存在要求行：续约禁用矩阵的硬判据 */
-  demandThisWindow: boolean;
-  transferRequest: { id: number; status: string; source: string; listingId: number | null } | null;
-}
+// ContractPendingView / ContractAppliedNotice / PlayerDemandState 已迁 src/contract/batch1.ts（v6.82.0 第 1 批）。
 
 export interface PlayerDetail {
   player: PlayerListItem & {
@@ -900,10 +886,8 @@ export interface SquadOverview {
   pendingSummary?: { count: number; wageDelta: number };
 }
 
-/** GET /api/club/pending-contracts（v6.54.0 步骤 7）：球队页阵容小字的数据源 */
-export interface PendingContractsResponse {
-  pending: ContractPendingView[];
-}
+/** GET /api/club/pending-contracts（v6.54.0 步骤 7）：球队页阵容小字的数据源。
+ *  PendingContractsResponse 已迁 src/contract/batch1.ts（v6.82.0 第 1 批）。 */
 
 export interface ContractImportPreview {
   channel: 'C';
@@ -1001,56 +985,9 @@ export interface MarketListingDetail {
   bids: { id: number; clubId: number; clubName: string; amount: number; createdAt: string; status: string }[];
 }
 
-/** 球员转会浮层（v6.74.0 期 C，设计 §6.1）：球员页状态条 / 浮层 / 转会台行展开共用一份响应 */
-export interface TransferPanelResponse {
-  club: { id: number; name: string } | null;
-  player: {
-    id: number;
-    fcId: number | null;
-    name: string;
-    position: string | null;
-    age: number | null;
-    ca: number | null;
-    pa: number | null;
-    clubId: number | null;
-    clubName: string | null;
-    isMine: boolean;
-    status: string;
-  };
-  /** 在流程内的最新一单；没有则回落最新已结束单；从未挂牌为 null */
-  listing: (MarketListingDetail['listing'] & { marketBidPaused: boolean }) | null;
-  bids: MarketListingDetail['bids'];
-  myBids: {
-    id: number;
-    listingId: number;
-    amount: number;
-    createdAt: string;
-    status: string;
-    holdStatus: 'held' | 'released' | 'settled' | null;
-  }[];
-  offers: { in: OfferListItem[]; out: OfferListItem[] };
-  negotiation: {
-    id: number;
-    status: 'active' | 'settled' | 'cancelled';
-    releaseFee: number | null;
-    expectedWage: number | null;
-    attemptsUsed: number;
-    remaining: number;
-    expiresAt: string | null;
-    settled: { wage: number; source: string; message: string } | null;
-  } | null;
-  transfer: {
-    id: number;
-    type: string;
-    fee: number | null;
-    fromClubId: number | null;
-    fromClubName: string | null;
-    toClubId: number | null;
-    toClubName: string | null;
-    completedAt: string | null;
-  } | null;
-  asOf: string;
-}
+/** 球员转会浮层（v6.74.0 期 C，设计 §6.1）：球员页状态条 / 浮层 / 转会台行展开共用一份响应。
+ *  TransferPanelResponse 已迁 src/contract/batch1.ts（v6.82.0 第 1 批；listing 不含 feed 专有
+ *  bidCount、settled.wage 为 number|null，甄别 FieldDiff #1/#2 处置见契约型注）。 */
 
 export interface ActivationResult {
   ok: boolean;
@@ -1082,13 +1019,8 @@ export interface MyBidRow {
   sellerClubName: string;
 }
 
-/** 转会台待办汇总（v6.73.0 期 B）：导航角标 / 桌内待办条共用；未绑队全 0 */
-export interface DeskSummary {
-  negotiations: number;
-  offers: number;
-  bids: number;
-  total: number;
-}
+/** 转会台待办汇总（v6.73.0 期 B）：导航角标 / 桌内待办条共用；未绑队全 0。
+ *  DeskSummary 已迁 src/contract/batch1.ts（v6.82.0 第 1 批）。 */
 
 export interface AdminReviewRow {
   id: number;
@@ -1125,101 +1057,8 @@ export interface AdminReviewBatchResult {
 }
 
 // ---- 审核工作台（v6.68.2 期 C） ----
-// 五张在途表一次取全：字段与 `src/worker/workbench.ts` 的 Workbench* 一一对应。
-
-export interface WorkbenchListingRow {
-  id: number;
-  playerId: number;
-  playerFcId: number | null;
-  playerName: string;
-  sellerClubId: number | null;
-  sellerClubName: string;
-  type: string;
-  status: string;
-  askPrice: number;
-  highestBid: number | null;
-  bidCount: number;
-  bidPaused: boolean;
-  deadlineAt: string | null;
-  hasProof: boolean;
-}
-
-export interface WorkbenchBidRow {
-  id: number;
-  listingId: number;
-  playerId: number;
-  playerFcId: number | null;
-  playerName: string;
-  clubId: number;
-  clubName: string;
-  amount: number;
-  createdAt: string;
-}
-
-export interface WorkbenchSessionRow {
-  id: number;
-  playerId: number;
-  playerFcId: number | null;
-  playerName: string;
-  clubId: number;
-  clubName: string;
-  transferId: number;
-  releaseFee: number | null;
-  expectedWage: number | null;
-  attemptCount: number;
-  expiryAnchorAt: string | null;
-}
-
-export interface WorkbenchTransferRow {
-  id: number;
-  playerId: number;
-  playerFcId: number | null;
-  playerName: string;
-  fromClubId: number | null;
-  fromName: string;
-  toClubId: number | null;
-  toName: string;
-  type: string;
-  status: string;
-  fee: number | null;
-  createdAt: string;
-}
-
-export interface WorkbenchForcedRow {
-  listingId: number;
-  playerId: number;
-  playerFcId: number | null;
-  playerName: string;
-  sellerClubId: number | null;
-  sellerClubName: string;
-  status: string;
-  askPrice: number;
-  highestBid: number | null;
-  bidPaused: boolean;
-  deadlineAt: string | null;
-}
-
-export interface WorkbenchInFlight {
-  listings: WorkbenchListingRow[];
-  bids: WorkbenchBidRow[];
-  sessions: WorkbenchSessionRow[];
-  transfers: WorkbenchTransferRow[];
-  forced: WorkbenchForcedRow[];
-  counts: { listings: number; bids: number; sessions: number; transfers: number; forced: number };
-  /** 默认隐藏 CPU 时四张转会类表各被藏掉多少条 */
-  hidden: { listings: number; bids: number; sessions: number; transfers: number };
-}
-
-export interface WorkbenchSearchHit {
-  kind: 'player' | 'club' | 'listing' | 'bid' | 'negotiation' | 'transfer';
-  id: number;
-  label: string;
-  sublabel?: string;
-}
-
-export interface WorkbenchSearchResult {
-  results: WorkbenchSearchHit[];
-}
+// 五张在途表一次取全：Workbench* 九型已迁 src/contract/batch1.ts（v6.82.0 第 1 批，
+// worker 内部名 ↔ 契约名别名对应见契约文件）。
 
 /** 转会单类型（与 src/worker 侧 transfer.type 取值一致；v6.67.0 由 string 收紧为联合类型） */
 export type TransferType =
@@ -1267,11 +1106,8 @@ export interface MyNegotiations {
 }
 
 // 工资预览（v6.40.0）：POST /api/negotiations/:sessionId/preview 的响应。只读——不落库、不耗轮次、
-// 不写审计；forecast 是服务端按 0.2/0.5/0.8 量化出的成功率档位（四档文案只在 Worker 侧维护）。
-export interface WageForecast {
-  forecast: string;
-  risk: boolean;
-}
+// 不写审计。WageForecast 已迁 src/contract/batch1.ts（v6.82.0 第 1 批，E 类双用：签约谈判
+// preview 与 demand 还价档位 preview 同形合一，见契约型注）。
 
 export interface ReleaseFeeResult {
   ok: boolean;
@@ -1297,101 +1133,9 @@ export interface TraineeSignResult {
 }
 
 // ---- v6.54.0 球员要求（闹涨薪）：GET /api/club/contract-demands ----
-// 字段与 src/worker/demand-ops.ts 的 DemandCard / ClubDemandInbox 一一对应；金额单位 m。
-// expected_wage 刻意不下发（界面只说「市场价」，§2.1），floor 下发（本队教练还价防呆需要）。
-export interface ContractDemandAttempt {
-  /** 第几轮还价（1 起；UNIQUE(demand_id, round)） */
-  round: number;
-  /** 经理本轮还价（球员不还价，只判定） */
-  wage: number;
-  accepted: boolean;
-  at: string;
-}
-
-export interface ContractDemandCard {
-  id: number;
-  playerId: number;
-  playerName: string | null;
-  position: string | null;
-  age: number | null;
-  ca: number | null;
-  season: number;
-  windowSeq: number;
-  /** pending/countered=待处理（后者只是存量行兼容）；accepted；rejected；expired；void（不出收件箱） */
-  status: string;
-  /** 终局来源：direct=明确放人 / collapse=没谈成 / lowball=低于底线 / expired；非终局 null */
-  resolution: string | null;
-  currentWage: number;
-  targetWage: number;
-  floorWage: number;
-  raisePct: number;
-  rcCurrent: number;
-  /** 待生效违约金（0 = 他合同里没有违约金条款，退化为只谈工资） */
-  rcFloor: number;
-  round: number;
-  maxRounds: number;
-  expiresAt: string;
-  createdAt: string;
-  resolvedAt: string | null;
-  /** 已接受行关窗 apply 后的时刻；null = 待生效 */
-  appliedAt: string | null;
-  attempts: ContractDemandAttempt[];
-}
-
-/** 接受确认的超帽警示输入（设计 §10.1/§10.5 同源；wageCap=null 表示未定级，不画帽线） */
-export interface DemandWageContext {
-  currentTotal: number | null;
-  pendingDelta: number | null;
-  wageCap: number | null;
-}
-
-export interface ContractDemandInbox {
-  /** 当前开窗的待处理（新/谈判中），按剩余时间升序 */
-  active: ContractDemandCard[];
-  /** 已接受、关窗 apply 前 */
-  accepted: ContractDemandCard[];
-  /** 最近终局（rejected/expired），resolved_at 降序 */
-  recent: ContractDemandCard[];
-  wageContext: DemandWageContext;
-}
-
-/** POST /:id/counter 的同请求即时判定结果（§5.3；negotiating 不是持久态，落在卡上=还价记录 + 轮次） */
-export interface DemandCounterResult {
-  demandId: number;
-  verdict: 'accepted' | 'negotiating' | 'rejected';
-  /** rejected 的终局档：collapse=三轮没谈成 / lowball=低于底线；其余 null */
-  source: 'collapse' | 'lowball' | null;
-  acceptedWage: number | null;
-  round: number;
-  eff: number;
-  p: number;
-  /** 段内第 2 次终局升档（没谈成也走「明确放人」三件套） */
-  escalated: boolean;
-}
-
-export interface DemandAcceptResult {
-  demandId: number;
-  wage: number;
-  releaseFee: number | null;
-}
-
-/** GET /api/club/transfer-requests：存续申请（pending/listed/released；released 即「不满」徽章载体） */
-export interface TransferRequestCard {
-  id: number;
-  playerId: number;
-  playerName: string | null;
-  demandId: number | null;
-  source: string;
-  status: string;
-  listingId: number | null;
-  lastListingWindowSeq: number | null;
-  createdAt: string;
-  resolvedAt: string | null;
-}
-
-export interface TransferRequestList {
-  requests: TransferRequestCard[];
-}
+// 收件箱八型已迁 src/contract/batch1.ts（v6.82.0 第 1 批；worker 内部名 DemandCard /
+// ClubDemandInbox 等的别名对应见契约文件）。金额单位 m；expected_wage 刻意不下发
+// （界面只说「市场价」，§2.1），floor 下发（本队教练还价防呆需要）。
 
 // ---- v0.6.0 DTO（附录 A〔5〕：旁路转会 + 匹配 + 窗口 + 强制拍卖）----
 

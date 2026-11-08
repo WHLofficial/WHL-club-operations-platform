@@ -9,6 +9,12 @@
 // 这里保持独立 SQL，字段语义由 `tests/workbench.test.ts` 锁住，公开 feed 的改动不受本文件影响。
 import type { Env } from './env.ts';
 import { sqlDisplayName } from '../core/player-name.ts';
+// 契约类型锚点（v6.82.0 第 1 批）：本模块下发的两个顶层响应以 src/contract/batch1.ts 为真源
+// 锁装配（甄别 naming 别名：worker 内部名 WorkbenchListing*/SearchHit 不动，见各接口注释）。
+import type {
+  WorkbenchInFlight as WorkbenchInFlightDto,
+  WorkbenchSearchHit as WorkbenchSearchHitDto,
+} from '../contract/batch1.ts';
 
 export interface WorkbenchListing {
   id: number;
@@ -103,7 +109,7 @@ function cpuClause(column: string, hide: boolean): string {
   return hide ? `AND COALESCE(${column}, 0) = 0` : '';
 }
 
-export async function loadInFlight(env: Env, opts: { includeCpu: boolean }): Promise<WorkbenchInFlight> {
+export async function loadInFlight(env: Env, opts: { includeCpu: boolean }): Promise<WorkbenchInFlightDto> {
   const hide = !opts.includeCpu;
   const db = env.DB;
 
@@ -362,7 +368,7 @@ export interface SearchHit {
 
 // 搜索（§6.2）：纯数字按「这一个数字可能是谁」并行探一遍七种 id；非数字查球员/俱乐部名字。
 // 只回候选、不回详情——选中后由前端跳到对应表并展开（避免第二个详情端点）。
-export async function searchWorkbench(env: Env, q: string): Promise<SearchHit[]> {
+export async function searchWorkbench(env: Env, q: string): Promise<WorkbenchSearchHitDto[]> {
   const db = env.DB;
   const hits: SearchHit[] = [];
   const trimmed = q.trim();

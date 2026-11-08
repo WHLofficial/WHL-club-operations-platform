@@ -13,6 +13,12 @@ import { isWindowOpen } from '../seasons.ts';
 import { loadNegotiationContext } from '../negotiation-context.ts';
 import { SILENT_ANCHOR_SQL, silenceHours, settleMessage } from '../negotiations.ts';
 import { listingDetailOf, type ListingBidRow, type ListingRow } from './market.ts';
+// 契约类型锚点（v6.82.0 第 1 批）：两个端点的响应以 src/contract/batch1.ts 为真源锁装配
+// （c.json 泛型 = 写侧编译期锁；甄别 FieldDiff #1/#2 的处置见契约型注）。
+import type {
+  DeskSummary as DeskSummaryDto,
+  TransferPanelResponse as TransferPanelResponseDto,
+} from '../../contract/batch1.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -28,7 +34,7 @@ app.get('/market/desk/summary', async (c) => {
   const club = await getBoundClub(c.env, user.id, c.req.raw);
   // 用户级计数不能进共享缓存
   c.header('Cache-Control', 'private, no-store');
-  if (!club) return c.json(EMPTY);
+  if (!club) return c.json<DeskSummaryDto>(EMPTY);
 
   const [negoScan, offerScan, bidScan] = await c.env.DB.batch([
     // 谈判：active 即待办（表无 turn 列）
@@ -57,7 +63,7 @@ app.get('/market/desk/summary', async (c) => {
   const negotiations = countOf(negoScan);
   const offers = countOf(offerScan);
   const bids = countOf(bidScan);
-  return c.json({ negotiations, offers, bids, total: negotiations + offers + bids });
+  return c.json<DeskSummaryDto>({ negotiations, offers, bids, total: negotiations + offers + bids });
 });
 
 // —— 期 C：球员转会浮层（设计 §6.1）——
@@ -87,8 +93,10 @@ interface OfferPanelRow {
   init_amount: number;
   round: number;
   note: string | null;
-  status: string;
-  turn: string;
+  /** offers.status 全部写值 = 六值（甄别核实，归 offers 批复核）；contract-demands 侧同理 */
+  status: 'pending' | 'intent' | 'accepted' | 'rejected' | 'withdrawn' | 'expired';
+  /** 0037_offers.sql 列注释：buyer/seller 二值 */
+  turn: 'buyer' | 'seller';
   listing_id: number | null;
   created_at: string;
   updated_at: string;
@@ -114,7 +122,8 @@ interface TransferPanelRow {
 
 interface NegoPanelRow {
   id: number;
-  status: string;
+  /** negotiation_sessions.status 三值（甄别核实与 api 手抄联合无失配） */
+  status: 'active' | 'settled' | 'cancelled';
   release_fee: number | null;
   expected_wage: number | null;
   attempt_count: number | null;
@@ -129,7 +138,8 @@ interface MyBidPanelRow {
   amount: number;
   created_at: string;
   status: string;
-  hold_status: string | null;
+  /** fund_holds.status 三值（0001_init.sql 注释）；LEFT JOIN 无冻结行时 null */
+  hold_status: 'held' | 'released' | 'settled' | null;
 }
 
 const OFFER_COLS = `o.id, o.player_id, o.amount, o.init_amount, o.round, o.note, o.status, o.turn, o.listing_id, o.created_at, o.updated_at,
@@ -304,7 +314,7 @@ app.get('/players/:id/transfer-panel', async (c) => {
   const expiresAt = anchor ? new Date(Date.parse(anchor) + silenceH * 3600_000).toISOString() : null;
   const attemptsUsed = nego?.attempt_count ?? 0;
 
-  return c.json({
+  return c.json<TransferPanelResponseDto>({
     club: club === null ? null : { id: club.id, name: club.name },
     player: {
       id: player.id,
@@ -319,7 +329,12 @@ app.get('/players/:id/transfer-panel', async (c) => {
       isMine: club !== null && player.club_id === club.id,
       status: player.status,
     },
-    listing: detail === null ? null : { ...detail.listing, marketBidPaused: detail.marketBidPaused },
+    // ListingRow.status 的行类型是 string（market.ts 内部声明，不在本批文件范围），运行时值域
+    // = ListingStatus 五值（甄别核实无失配）⇒ 此处断言仅编译期收窄，不改载荷字节。
+    listing:
+      detail === null
+        ? null
+        : ({ ...detail.listing, marketBidPaused: detail.marketBidPaused } as NonNullable<TransferPanelResponseDto['listing']>),
     bids: detail?.bids ?? [],
     myBids: myBids.results.map((b) => ({
       id: b.id,
