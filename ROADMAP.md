@@ -124,6 +124,20 @@
 
 ---
 
+## v6.81.0 · FC 金槽抑制 FC 银槽（2026-11-08，已上线 Version bfc57b4c）
+
+**裁决**：全库巡检发现 2 处 FC 存档原生「金银共存且银未抑制」（Rodrygo 105 银搓射+金搓射、Diogo Costa 136 银远抛+金远抛）——抑制公式只处理「金明细抑制 FC 银槽」，FC 金槽不抑制任何银源。修复走两步：**a 案存量清理**（2 条 `json_set` 置 0 重复 FC 银槽，台账银 6→5 / 5→4，审计 `playstyle_fc_silver_clear`）+ **b 案公式治本**（用户拍板「1 吧，开干」）。
+
+**交付**：`src/core/playstyle-rules.ts` 两处——① `mergedPlaystyleList` FC 银条目跳过条件追加「FC 金槽同基础 ID」；② `fullCountSql('silver')` 逐槽追加三金槽比较。**中途抓到真 bug**：json_extract 对不存在的键返回 NULL，`NULL <> 1` 即 UNKNOWN 会把真银槽整槽误杀（growth 557 运行时用例当场变红暴露）→ 三金槽一律 `COALESCE(…, 0)`。
+
+**验收**：typecheck 三份清；vitest **205 文件 / 3197 例全绿**（基线 3194 净 +3）；变异 M1（删清单抑制）2 红 / M2（删 SQL 抑制段）1 红；0086 同源锁**降级为历史形态锁**（迁移已 apply 保持 v6.63.0 形态，silver 展开有意漂移、gold 仍逐字一致）；测试计划 `docs/test-plans/v6.81.0-fc-gold-suppress.md`（8 TC）。上线 Version **`bfc57b4c-e97b-47a4-8c40-d888aaf724ed`** @2026-11-08T08:42:10Z（Workers Builds，push `72097d6..6a24793` 2 枚 = v6.81.0 + v6.80.0 上线记录 docs）；回读 health 200、线上资产 `index-D5MlEB6O.js` 含版本串 6.81.0、Rodrygo 详情银 5/金 1（抑制生效）、Schick 转会记录 2 条（补强批 transfers 补录在线上生效）。
+
+**同批生产写（本会话，均在授权内）**：CPU 补强批（米兰签 13/曼城签 11 + 解约 6 + 号码 24，无合同口径 + transfers 补录 30 行，KV 3262→3281）；属性直调批（CA 7 人 + PS 明细 14 条/11 人 `source='shop'` + FC 银槽清理 2，KV→3280/3281）。工件一律不 commit（用户 2026-11-08 规矩），SQL 留 `scripts/prod-20261108-*/` 与 `scratch/`。
+
+**待办**：公式缺口的源头治理——FC 编辑器/游戏进化再写金银共存存档时，重导由运行时公式自动抑制（无需再动数据）；ROADMAP 本节随本枚 docs 提交补档。
+
+---
+
 ## v6.80.0 · 球员在途状态读模型（2026-11-08，本地提交未推送）
 
 **状态**：**已上线（2026-11-08）**，push `5c1f75d..72097d6`（7 枚：1eb0cfe / 1f9f68a / 937f093 / 28d6f66 / af30f07 / 4fad549 / 72097d6，含并行会话两枚 scripts 工件）触发 CF Workers Builds 自动部署，生产 Version **`3679aca4-2d8e-4ba5-bfbf-2791b07eff6a`** @2026-11-08T07:33:42Z；上线回读 `/api/health`、`/api/players?limit=1`、`/api/market/listings`、`/api/clubs`、`/api/squads` 全 200，线上入口资产 `index-B02Gm9xR.js` 与本地 dist 逐字同名。判级 **minor**（新增读模型模块与海捞速查端点数据源切换；`/api/market/sea-lookup` 响应逐格不变、`ensureNotInFlight` 三档文案逐字不变）。**零迁移、零 UI**；第二批唯一行为变化 = 挂牌 dup 对 matched_pending 脏行收紧（生产交叉行 = 0，见下）。
