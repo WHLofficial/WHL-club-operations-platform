@@ -1038,3 +1038,61 @@ describe('结算守卫与活跃口径（评审修复 P1-1/P1-2/P2-④）', () =>
     expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'listing_settle'")?.n).toBe(1);
   });
 });
+
+// ---- 挂牌 dup 四态统一（v6.80.0 第二批 · 测试计划 §9.3 TC-B2-01…03）----
+// 脏行形状：球员 status='normal' 但 listings 留着活跃/历史行（生产只读扫描交叉 = 0，纯防御性夹具）。
+// 直插行的 deadline_at / listed_day 全 NULL ⇒ 不进 settleOverdue 任何扫描（active 扫描只取
+// listed/bidding 且 listed_day IS NULL 即 continue；matched_pending 扫描只取 type='activation'），
+// 路由入口的真结算对它空转，脏行活着走到 dup 关。球员保持 normal 是刻意的：隔离 dup 关本身
+// （listed 真实流程的球员状态守卫由既有用例盖）。
+function plantListing(sqlite: DatabaseSync, playerId: number, sellerClubId: number, status: string) {
+  sqlite.exec(
+    `INSERT INTO listings (player_id, seller_club_id, type, ask_price, status) VALUES (${playerId}, ${sellerClubId}, 'normal', 15, '${status}')`,
+  );
+}
+
+function seedPlayerWithContract(fx: Fixture, sellerClub: number, id: number) {
+  fx.sqlite.exec(
+    `INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, market_value, status) VALUES (${id}, 'fc${id}', '替补${id}', ${sellerClub}, 'CM', 24, 75, 82, 20, 'normal');
+     INSERT INTO contracts (id, player_id, club_id, release_fee, wage, contract_type, is_active, effective_from) VALUES (${id}, ${id}, ${sellerClub}, 10, 1, 'formal', 1, '2026-07-01');`,
+  );
+  return id;
+}
+
+describe('挂牌 dup 四态统一（v6.80.0 第二批）', () => {
+  it('TC-B2-01 脏行收紧：normal × matched_pending 活跃行被 400 拦截，文案逐字不变', async () => {
+    const fx = freshEnv();
+    const mf = await seedMarket(fx);
+    const pid = await seedSecondPlayer(fx, mf.sellerClub);
+    plantListing(fx.sqlite, pid, mf.sellerClub, 'matched_pending');
+    const res = await listPlayer(mf, pid, 9);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe('这名球员已经有一单在市场里了，等它结束再挂');
+  });
+
+  it('TC-B2-02 既有三态回归：listed / bidding / pending_review 脏行同样 400 同文案', async () => {
+    for (const status of ['listed', 'bidding', 'pending_review']) {
+      const fx = freshEnv();
+      const mf = await seedMarket(fx);
+      const pid = await seedSecondPlayer(fx, mf.sellerClub);
+      plantListing(fx.sqlite, pid, mf.sellerClub, status);
+      const res = await listPlayer(mf, pid, 9);
+      expect(res.status, `脏行 ${status}`).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toBe('这名球员已经有一单在市场里了，等它结束再挂');
+    }
+  });
+
+  it('TC-B2-03 正常路径回归：无挂牌行 201；cancelled / delisted / completed 历史行不误伤', async () => {
+    const fx = freshEnv();
+    const mf = await seedMarket(fx);
+    const pid = await seedSecondPlayer(fx, mf.sellerClub);
+    expect((await listPlayer(mf, pid, 9)).status).toBe(201);
+    let next = 12;
+    for (const status of ['cancelled', 'delisted', 'completed']) {
+      const id = seedPlayerWithContract(fx, mf.sellerClub, next++);
+      plantListing(fx.sqlite, id, mf.sellerClub, status);
+      const res = await listPlayer(mf, id, 9);
+      expect(res.status, `历史行 ${status} 不拦`).toBe(201);
+    }
+  });
+});

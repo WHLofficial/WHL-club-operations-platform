@@ -25,7 +25,7 @@ import { activationFee } from '../../core/bypass-rules.ts';
 import { foldNameQuery, likeContains, sqlFold } from '../../core/name-fold.ts';
 import { CURRENT_TICKS_SQL } from '../contract-ticks.ts';
 import { buildRumors, resolveRumorWindow } from '../rumors.ts';
-import { seaVerdicts } from '../player-flow-state.ts';
+import { ACTIVE_LISTING_STATES_SQL, seaVerdicts } from '../player-flow-state.ts';
 import { firstPlayerByRef } from '../player-ref.ts';
 import { loadMarketContext, type MarketContext } from '../market-context.ts';
 import { createConfigService } from '../../core/config.ts';
@@ -261,7 +261,11 @@ app.post('/market/listings', async (c) => {
     .first<{ id: number }>();
   if (intent) throw new HttpError(409, '这名球员已有意向单在等开窗，先了结它再挂牌', 'intent_exists');
 
-  const dup = await c.env.DB.prepare(`SELECT id FROM listings WHERE player_id = ? AND status IN ('listed', 'bidding', 'pending_review') LIMIT 1`)
+  // 挂牌查重走在途四态（player-flow-state.ts 常量，v6.80.0 第二批统一；旧三态漏 matched_pending
+  // 脏行——normal 球员挂着一张 matched_pending 时能再挂第二单）。matched_pending 只在激活挂牌的
+  // 匹配窗产生（settleByContractType 仅 type='activation' 写它），那时球员必是训练营态、走不到这条
+  // 重挂路径——四态收紧拦的是脏行，不拦任何合法流程。player_id 等值走 idx_listings_player。
+  const dup = await c.env.DB.prepare(`SELECT id FROM listings WHERE player_id = ? AND status IN ${ACTIVE_LISTING_STATES_SQL} LIMIT 1`)
     .bind(playerId)
     .first<{ id: number }>();
   if (dup) throw new HttpError(400, '这名球员已经有一单在市场里了，等它结束再挂');

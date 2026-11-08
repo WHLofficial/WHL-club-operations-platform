@@ -546,3 +546,35 @@ describe('TC-RET 源码锁（v6.80.0 迁移收口）', () => {
     expect(workerSrc('player-flow-state.ts')).not.toMatch(/ACTIVE_SESSION_SQL\s*=/);
   });
 });
+
+// ---- 第二批（v6.80.0 并入）：ACTIVE_LISTING_STATES_SQL 常量单源（测试计划 §9.3 TC-B2-04/05）----
+// 与 TC-RET 同理：常量改窄 / 改回本地定义 / 改回三态字面量都没有运行时信号（编译与既有用例不红），
+// 文本扫描锁死。字面量含逗号后空格 = offers.ts 旧常量的逐字节形态，保其 SQL 逐字节等价。
+describe('第二批 · ACTIVE_LISTING_STATES_SQL 常量单源', () => {
+  const FOUR_STATES = "('listed', 'bidding', 'matched_pending', 'pending_review')";
+
+  it('TC-B2-04 唯一字面量在模块导出处；offers / market 两消费方全部走 import', () => {
+    const flow = workerSrc('player-flow-state.ts');
+    // (a) 导出恰 1 处、字面量逐字节
+    expect(flow.match(/export const ACTIVE_LISTING_STATES_SQL = .*/)?.[0]).toBe(
+      `export const ACTIVE_LISTING_STATES_SQL = "${FOUR_STATES}";`,
+    );
+    // (b) 模块内部同源：loadFlow 用常量插值，模块文件内四态字面量（含空格形态）只出现导出处这 1 次
+    expect(flow).toContain('WHERE status IN ${ACTIVE_LISTING_STATES_SQL} AND player_id IN');
+    expect(flow.split(FOUR_STATES).length - 1).toBe(1);
+    // (c) offers.ts 本地定义删除、改 import
+    const offers = workerSrc('offers.ts');
+    expect(offers).not.toMatch(/const\s+ACTIVE_LISTING_STATUSES\s*=/);
+    expect(offers.match(/import\s*\{([^}]*)\}\s*from\s*'\.\/player-flow-state\.ts'/)?.[1]).toContain(
+      'ACTIVE_LISTING_STATES_SQL',
+    );
+    // (d) market.ts dup 行走常量，三态字面量清零（workbench.ts 的统计子集不在锁内——撤出项待甄别）
+    const market = workerSrc('routes/market.ts');
+    expect(market).toContain('status IN ${ACTIVE_LISTING_STATES_SQL}');
+    expect(market).not.toContain("('listed', 'bidding', 'pending_review')");
+  });
+
+  it('TC-B2-05 offers.ts:913 关联子查询插值文本锁定（与 TC-B2-04a 字面量联合 = SQL 逐字节等价）', () => {
+    expect(workerSrc('offers.ts')).toContain('l.status IN ${ACTIVE_LISTING_STATES_SQL} LIMIT 1) AS active_listing_id,');
+  });
+});

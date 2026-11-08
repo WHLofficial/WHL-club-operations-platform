@@ -26,13 +26,12 @@ import { queueClubNotification } from './notify.ts';
 import { notifyShortlistWatchers } from './shortlist.ts';
 import { sqlDisplayName } from '../core/player-name.ts';
 import { rollbackRcChangeForPlayer } from './bypass.ts';
+import { ACTIVE_LISTING_STATES_SQL } from './player-flow-state.ts';
 import { loadMarketContext } from './market-context.ts';
 
 function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
 }
-
-const ACTIVE_LISTING_STATUSES = "('listed', 'bidding', 'matched_pending', 'pending_review')";
 
 // 附言（对话式改造后的聊天文本）上限：与前端 SideOps 的 slice(0,100) 同值，服务端不再单独放宽
 const NOTE_MAX = 100;
@@ -910,7 +909,7 @@ export async function expireStaleOffers(env: Env, opts: { origin: AuditOrigin; a
   const candidates = await db
     .prepare(
       `SELECT o.id, o.status AS offer_status, o.player_id, o.amount, o.buyer_club_id, o.seller_club_id, p.status AS player_status, p.club_id AS player_club_id,
-              (SELECT l.id FROM listings l WHERE l.player_id = o.player_id AND l.status IN ${ACTIVE_LISTING_STATUSES} LIMIT 1) AS active_listing_id,
+              (SELECT l.id FROM listings l WHERE l.player_id = o.player_id AND l.status IN ${ACTIVE_LISTING_STATES_SQL} LIMIT 1) AS active_listing_id,
               ${sqlDisplayName('p')} AS player_name
        FROM offers o
        JOIN players p ON p.id = o.player_id

@@ -4,9 +4,11 @@
 // - flowState：批量一等（单查 = 长度 1），每人 { listing, pendingReview, signing } 三个布尔 kind；
 // - seaVerdicts：海捞资格七关链（原 bypass.ts checkSeaSignEligible 整体迁入，顺序与文案逐字不变）；
 // - ensureNotInFlight：续约 / 解约 / 上调等写路径的一票否决（三档文案逐字不变）。
-// 挂牌 dup（routes/market.ts:265 的三态检查）、激活上调锁（activations.ts）、demand 排除集
-//（demand-ops.ts）是第二批消费方；routes/market.ts 的 sea-lookup 批量快照副本已于 v6.80.0 第二步
-// 退役，端点改吃本模块，「两处口径必须同步改」注释协议与跨实现一致性用例锁一并消灭。
+// 挂牌 dup（routes/market.ts，v6.80.0 第二批已接四态常量）与 offers.ts 的过期扫描关联子查询
+// 消费下方 ACTIVE_LISTING_STATES_SQL；激活上调锁（activations.ts 的 promotion 子集谓词）与
+// demand 排除集（demand-ops.ts）经第二批评估留在原处（单消费者 / 已在真源，见计划文件撤出项）。
+// routes/market.ts 的 sea-lookup 批量快照副本已于 v6.80.0 第二步退役，端点改吃本模块，
+// 「两处口径必须同步改」注释协议与跨实现一致性用例锁一并消灭。
 import { HttpError } from '../lib/http.ts';
 import { ACTIVE_SESSION_SQL } from './negotiation-guard.ts';
 import { cpuClubIds } from './growth.ts';
@@ -15,6 +17,12 @@ import type { OpenWindow } from './seasons.ts';
 // D1 每查询绑定参数上限 100：分片 ≤98（v6.79.1 惯例，先例 src/worker/routes/players.ts 的
 // bindBatchMax），留余量给 season/window 等非 IN 参数。
 const SHARD_SIZE = 98;
+
+// 活跃挂牌四态（GLOSSARY「在途」）的唯一字面量。模块内部 listings 查询与两个外部消费方
+//（routes/market.ts 的挂牌 dup、offers.ts 的 expireStaleOffers 关联子查询）都从这里取，
+// 不得再手写枚举——v6.80.0 第二批消灭 market.ts 三态与四态并存的漂移（字面量含逗号后空格，
+// 与 offers.ts 旧常量逐字节相同，保其 SQL 逐字节等价）。
+export const ACTIVE_LISTING_STATES_SQL = "('listed', 'bidding', 'matched_pending', 'pending_review')";
 
 // —— 谓词双形态并存（计划 v6.80.0 裁决 8：「宁可带兜底，不可破坏判级」）——
 // 步骤 0 只读核查（本地 + 生产 `t.status='signing' AND s.status='active'`）：存量 本地 1 / 生产 0，
@@ -62,7 +70,7 @@ async function loadFlow(db: D1Database, playerIds: number[]): Promise<FlowLoad> 
     const listed = await db
       .prepare(
         `SELECT player_id FROM listings
-         WHERE status IN ('listed', 'bidding', 'matched_pending', 'pending_review') AND player_id IN (${ph})`,
+         WHERE status IN ${ACTIVE_LISTING_STATES_SQL} AND player_id IN (${ph})`,
       )
       .bind(...part)
       .all<{ player_id: number }>();
@@ -100,8 +108,8 @@ async function loadFlow(db: D1Database, playerIds: number[]): Promise<FlowLoad> 
 
 /**
  * 批量在途三查（v6.80.0 底层）。请求的每个 id 都有键（查无此人三 false）；空数组回空 Map、零查询。
- * 只回布尔 kind、不带行 id；批量消费方（海捞速查 / 未来第二批的挂牌 dup、demand 排除集）复用本函数，
- * 不要再手写四态枚举。
+ * 只回布尔 kind、不带行 id；批量消费方（海捞速查）复用本函数，不要再手写四态枚举。
+ * 挂牌 dup 是单人点查、走下方常量自拼 SQL（比整份 flowState 少两条查询），不走本函数。
  */
 export async function flowState(db: D1Database, playerIds: number[]): Promise<Map<number, PlayerFlowState>> {
   return (await loadFlow(db, playerIds)).state;
