@@ -126,7 +126,7 @@
 
 ## v6.80.0 · 球员在途状态读模型（2026-11-08，本地提交未推送）
 
-**状态**：**本地全绿，未 push 未部署**（feat/squad-numbers 分支：feat 提交 `1f9f68a` + 评审修复第 1 轮）。判级 **minor**（新增读模型模块与海捞速查端点数据源切换；`/api/market/sea-lookup` 响应逐格不变、`ensureNotInFlight` 三档文案逐字不变）。**零迁移、零 UI、零生产写**。
+**状态**：**本地全绿，未 push 未部署**（feat/squad-numbers 分支：feat 提交 `1f9f68a` + 评审修复第 1 轮 `937f093` + docs `28d6f66` + **第二批 `4fad549`**，2026-11-08 并入、不 bump）。判级 **minor**（新增读模型模块与海捞速查端点数据源切换；`/api/market/sea-lookup` 响应逐格不变、`ensureNotInFlight` 三档文案逐字不变）。**零迁移、零 UI**；第二批唯一行为变化 = 挂牌 dup 对 matched_pending 脏行收紧（生产交叉行 = 0，见下）。
 
 **背景与裁决**：「这名球员现在能不能动」的判定此前散落多处（bypass.ts 的 `findInFlight`/`ensureNotInFlight`/`checkSeaSignEligible` + market.ts sea-lookup 批量快照副本），靠「跨实现一致性测试锁 + 『两处口径必须同步改』注释协议」维持。grilling 九条裁决（2026-11-07，计划文件在用户级记忆目录 `plan-v6.80.0-player-flow-state.md`）：①只收读，「球员状态还原」5 份写实现划给将来挂牌收口模块；②首批 = 在途三查单点化 + `checkSeaSignEligible` 搬入 + sea-lookup 副本退役，挂牌 dup / 激活上调锁 / demand 排除集是第二批**另立增量**；③接口两层：`flowState` 批量一等（98/批分片，v6.79.1 惯例）+ `seaVerdicts` / `ensureNotInFlight` 建在其上；④落点 `src/worker/player-flow-state.ts`；⑤性能验收 = flowState 每分片 ≤3 条 IN 查询、sea-lookup 读量不回退；⑥bypass **不留转发导出**，消费方与测试直接改 import；⑦`negotiation-guard.ts` 不并，`ACTIVE_SESSION_SQL` 只 import 不复制；⑧signing 谓词双形态并存——步骤 0 只读核查「signing 单 × active 会话」存量本地 1 / 生产 0，宁可带兜底不可破坏判级。GLOSSARY「球员在途」词条为命名与口径真源。
 
@@ -139,7 +139,10 @@
 
 **验收**：typecheck 三份全清；`npm run build` 成功（`dist/assets/index-B02Gm9xR.js` 755.83 kB / gzip 236.91 kB，8.33s；chunk >500 kB 警告为既有现象，本版零前端改动）；`npm test` 205 文件 / **3189 例全绿**（vitest 输出原文 `Tests 3189 passed (3189)`；`tests/player-flow-state.test.ts` 21 例 = flowState 三 kind 四态金丝雀会话四形状 197 人三分片量化锁 + seaVerdicts 七关矩阵逐字顺序锁 CPU 例外禁签参数 errCode 形状 signing 残留 TC-LK-02 计数锁 + ensureNotInFlight 三档优先序双谓词行为锁 + TC-RET-01/02/03 源码锁）；**sea-lookup 判级逐格对照**：`/api/market/sea-lookup` 响应与改前逐格相同——TC-LK-01 单实现端点金样（11 人矩阵 eligible/reason 逐格）+ TC-SV 七关矩阵 toStrictEqual 逐字双面锁，`ensureNotInFlight` 三档文案逐字（TC-EIF-01）；**步骤 0 存量**「signing 单 × active 会话」本地 1 / 生产 0 → 按裁决 8 保留双谓词兜底（signing = 任意 active 会话，`ensureNotInFlight` 保留旧连接谓词，TC-EIF-03 + TC-FLS-04③ 行为锁）；**变异验证四处全命中**（bypass 加回转发导出 → TC-RET-01 恰 1 红 / market.ts 加回协议注释 → TC-RET-02 恰 1 红 / player-flow-state.ts 字面复制 `ACTIVE_SESSION_SQL` → TC-RET-03 恰 1 红 / 计数器漏计无 bind 查询 → TC-LK-02 恰 1 红）；TC-LOOKUP-05 跨实现强锁改写为 TC-LK-01 单实现端点金样、TC-LOOKUP-06 由 TC-SV-01 替代、TC-LOOKUP-01/02/03/04/07 零改动保留；commit `1f9f68a`（feat）+ `937f093`（评审修复第 1 轮）。
 
-**第二批（另立增量，本版不动）**：`routes/market.ts:265` 挂牌 dup 三态与四态统一（须先实证 matched_pending 时 `players.status` 必为 listed 保证行为中性）、激活上调锁（activations.ts:75-76）、demand-ops 排除集 ②③。
+**第二批（2026-11-08 并入本版，不 bump；grilling 第二轮 5 问，Q1–Q3/Q5 按推荐、Q4 改判「并入 6.80.0 不 bump」；commit `4fad549`，评审 🔴 0 / 🟡 0 / 🟢 1 注释补强已 amend）**：
+- **交付**：① 模块导出 `ACTIVE_LISTING_STATES_SQL`（四态唯一字面量，含逗号后空格 = offers 旧常量逐字节形态），`loadFlow` 内部同源改用；② `routes/market.ts` 挂牌 dup 三态→四态（唯一行为变化 = `normal` × listings `matched_pending` 脏行从放行变 400，文案逐字不变；`matched_pending` 全仓唯一写入方 `settleByContractType` 仅 `type='activation'` 写、彼时球员必为训练营态走不到重挂 ⇒ 收紧不拦任何合法流程；生产只读扫描「normal × 活跃四态」交叉 = **0**，EXPLAIN 实测查询从 0006 部分唯一索引退到 0001 `idx_listings_player`、非全表扫）；③ `offers.ts:35` 本地常量删除改 import，`:913` SQL 逐字节等价、零新增查询。
+- **撤出项（事实核查推翻原假设，登记为裁决）**：激活上调锁（activations.ts:75-76）——要的是 promotion 子集谓词（active 会话 JOIN transfers 且 `t.type='promotion'`），flowState 服务它需加第四 kind + JOIN，单消费者，删除测试不过 → 留在 negotiation-guard；demand ②③——② 已 import 真源 `ACTIVE_SESSION_SQL`、③ 是 transfers 状态枚举无漂移史 → 不动；`transfers.ts:918`——写侧收口（UPDATE 目标守卫），属将来挂牌收口模块（#2 ListingSettlement）；统计/展示 6 处（rumors:132 / workbench:121,175 / season-settle:231 / desk:197 / admin-overview:46）——子集语义（故意分岔未甄别），登记「待甄别」；negotiation-guard 收编评估——直接消费方仍 6 处（demand-ops/window-machine/season-settle/bypass×2/promotion/player-flow-state），条件未熟**不收编**。
+- **测试与验收**：测试计划 §9 追加 TC-B2-01…05（脏行 400 文案逐字 / 既有三态回归 / 正常路径 201 不误伤 / 常量单源源码锁 / offers SQL 逐字节插值锁），`npm test` 205 文件 / **3194 例全绿**（净 +5）；变异 M1–M4 全命中（M1 常量删 `matched_pending` → 6 红含 TC-FLS-02 金丝雀——改一处常量模块与两消费方同变，单源的直接证明；M2/M3/M4 各恰 1/2/1 红）；typecheck 三份清、build 成功。**执行不用 workflow**（用户 Q5 拍板），直接改。
 
 **已知不改**：`src/worker/transfers.ts` 的注释订正（findInFlight → 在途三查）留在工作区未提交——该文件夹带其它会话的未提交改动，整文件 add 会夹带，注释性改动不影响提交树编译；signing 双谓词并存是裁决 8 的刻意保留，不是待办。
 
