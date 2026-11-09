@@ -124,6 +124,31 @@
 
 ---
 
+## v6.83.0 · 挂牌收口单入口：`advance(listingId, cause)` + 转移表（2026-11-09，本地未 push）
+
+**状态**：两步施工 + 评审修复完毕，**本地未 push**（`81c3f4d` 转移表与唯一入口 → `1862889` 12 写点迁移 → `da0e808` 评审修复；分支 `feat/squad-numbers`）。判级 **patch**（内部重构：12 处 `UPDATE listings SET status` 收成 1 处语句构造器；12 cause 的目标态 / note 文案 / 附带列 / 语句位 / 批内副作用顺序逐格不变；零迁移、零生产写、零 UI、零新增端点）。
+
+**背景与裁决**：架构走查（2026-11-07）候选 #2——5 份关单实现、实测 listings 状态写点 12 处 / 7 文件（bypass 强拍取消 / activations 留队 / market-settle ×4 / market-intervene ×2 / negotiations 驳回 / transfers 成交回写 + 审核驳回 / routes/market 首价落价），状态机 UPDATE 分散在各 handler。grilling 原定「非法转移 409」按**运行时零变化**原则**降级**：非法 `(from, cause)` 由 SQL 守卫 `changes=0` **静默 no-op**，不新增 409、不新增错误文案；`src/core/listing-state.ts` 的转移表**只作语义真源与测试验证器**（运行时不读表、不判错），执行真源是 `src/worker/listing-ops.ts` 每条 SQL 的 WHERE 守卫；409 只保留在调用方原有预检处（`market-intervene.ts:84-86` admin_cancel 送审单据文案逐字；`routes/market.ts` 出价过线与 `bid_paused` 预检原样），调用方 `changes` 分支（`'already'` 等）未动。测试计划 `docs/test-plans/v6.83.0-listing-closeout.md`（qa-test-planner 口径：32 例 / 11 变异）。
+
+**交付**：
+- 核心 5 文件：`AGENTS.md`（:64 唯一入口行）、`package.json`（6.83.0）、`src/core/listing-state.ts`（12 cause + 12×5 转移表 + `advanceTarget`）、`src/worker/listing-ops.ts`（`advanceStatement` / `advance`，12 条 SQL 模板与 note / 附带列固化）、`tests/listing-state.test.ts`。
+- 迁移 8 文件（`1862889`，+78/−55）：`src/worker/routes/market.ts`、`market-settle.ts`、`market-intervene.ts`、`bypass.ts`、`activations.ts`、`negotiations.ts`、`transfers.ts`、`tests/listing-source-lock.test.ts`。
+- 语句位：11 处批内原位（批内下标：bypass 0、activations 2、negotiations 3、review_rejected 3、admin_cancel 0、admin_reset 2、settle / unbid / activation_price 0、first_bid 4）+ `activation_match_start` 唯一独立 `.run()`（`market-settle.ts:330`）；两条非 status 写入未收编（`market-settle.ts:533` note 刷新、`routes/admin/market.ts:105` `bid_paused`）。
+- 测试：`tests/listing-state.test.ts` 17 例 + `tests/listing-source-lock.test.ts` 4 例；源码锁整文件空白归一化 + 大小写不敏感，listing-ops 外零 `UPDATE listings SET status`。
+
+**验收**：typecheck 三份全清（评审复核记录）；vitest **209 文件 / 3213 例全绿**（脚本统一跑，Start 10:23:31，Duration 113.13s；v6.82.0 基线 207/3202，净 +2 文件 +11 例 = 评审修复前 8+3）；`da0e808` 后定向复跑 `npx vitest run tests/listing-state.test.ts tests/listing-source-lock.test.ts` = **2 文件 / 21 例全绿**（Start 11:07:48，3.51s），全套按 209/3223 待脚本统一复跑。build 无本轮实测记录（零 web 改动，计划 Out）；e2e / 生产回读不在本轮。评审 7 条（3 high / 2 medium / 2 low）：A/B/C 三条 high 补锁（TC-MX-04/08/09，删守卫/删窗曾 74/71/50 例全绿）、D 源码锁补 `i` 与整文件归一化、E 计划覆盖缺口部分补齐（TC-MX-06/07、TC-COL-02(b)(c)、TC-ORD-04）其余登记、F 补 TC-TRG-05 条件成对文本锁、G 运行时零变化成立无需改。变异 4 处：M1（forced `type='forced'` 守卫）**未命中**（hit=false，2 文件 / 29 例全过 ⇒ 测试洞，已由 `da0e808` 补锁未重跑）、M2（matched_kept 文案）2 例红、M3（transfers 插回直写）源码锁 1 例红、M4（deal_done 目标态）矩阵 1 例红；均还原后全绿。运行时零变化逐格核对：12 条 SQL 逐字等价（状态值 / note / 附带列 / WHERE / 绑定顺序）、批内下标全保持、两条非 status 写入未误收编、`advanceStatement` 11 + `advance` 1 = 12。
+
+**登记不改（后续增量）**：
+- 测试计划 32 例实际 21 例（完整 20 / 部分 5 / 未落地 7：TC-MX-10、TC-ORD-02、TC-ORD-03、TC-SRC-04、TC-TRG-01/02/04）；§4 十一处变异只执行 4 处（M5–M11 未做）——补锁随下一阶段，逐条对照见测试计划 §9。
+- 第一步登记（已被第二步收编，保留历史）：`81c3f4d` 时 12 个写点「本步未迁移」、原直写仍在 7 文件原位、`AGENTS.md` 规则与存量直写并存——`1862889` 后不再成立。
+- `advanceStatement` / `advance` 首参 `db`（D1 语句须由具体库构造，任务允许签名自定）；调用方保持语句原批内位置。
+- 未新增迁移，`tests/d1.ts` 的 `MIGRATION_FILES` 未动；触发器 0040/0059 与 first_bid 双窗条件现状正确，仅由 TC-TRG-05 文本锁防单侧漂移，行为未改。
+- 类型断言 `negotiations.ts:987` / `transfers.ts:1293` 的 `listingId as number` 仅编译期，运行时仍按原值（含 null）绑定，SQL 以 `id = NULL` 执行即 changes=0，与原 no-op 语义逐字一致。
+
+对照明细见 `docs/test-plans/v6.83.0-listing-closeout.md` §9「实际交付对照」。
+
+---
+
 ## v6.82.0 · 跨端契约层：`src/contract/` 单一真源（2026-11-09，已上线 Version 5bd80a50）
 
 **状态**：六批施工 + 评审修复完毕，**已 push 并上线**（push `6a24793..8a07066 → main` 共 9 枚，本版占 7 枚：`0de3f09` 批1 → `f08fa52` 批2 → `8851458` 批3 → `3fefaf0` 批4 → `d91963a` 批5 → `4e50318` 批6 → `77d8060` 评审修复；工作区分支 `feat/squad-numbers`，七枚共 56 文件 +5387/−3630）。判级 **patch**（纯类型层迁移：worker 各端点 `c.json` 载荷逐字节不变、零迁移、零生产写；唯一 web 运行时改动 = B5 删「本次免费」死分支，恒假分支从未渲染、零可见变化）。

@@ -4,6 +4,39 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.83.0] · 挂牌收口单入口：`advance`/`advanceStatement` + 转移表（2026-11-09，本地未 push）
+
+**Added**
+
+- **`src/core/listing-state.ts`（新模块，60 行）**：listings 终态转移的语义真源——`LISTING_CLOSE_CAUSES` 12 cause（first_bid / activation_match_start / settle_for_review / unbid_expired / activation_price_expired / admin_reset / admin_cancel / forced_cancel / matched_kept / negotiation_closed / review_rejected / deal_done）、`LISTING_CLOSE_TRANSITIONS`（每条 cause 的合法 from 集与目标态，`deal_done` 保持四态 catch-all ⇒ delisted，v6.66.0 疤痕刻意不收敛）、纯函数 `advanceTarget(from, cause)`（表外/未知状态返回 null）。零 IO、不抛错；运行时不消费，仅供测试作语义验证器。
+- **`src/worker/listing-ops.ts`（新模块，186 行）**：12 个收口 cause 的 `UPDATE listings SET status` 唯一写侧入口——`advanceStatement<C>(db, listingId, cause, params)` 返回单条 `D1PreparedStatement`（调用方原位塞回自己的 `db.batch`），`advance<C>(...)` = 前者 `.run()` 后回 `meta.changes ?? 0`（唯一独立执行场景 `activation_match_start`）。note 四类（5 固定 + 3 参数化 + 1 置 NULL + 3 不碰）与逐 cause 附带列固化在模板内；`nowSql()` 与既有三处同口径（`strftime('%Y-%m-%dT%H:%M:%fZ','now')`，`first_bid` 的 `last_bid_at` 仍为 SQL 侧内联，未改绑定）。
+- **两个新测试文件**：`tests/listing-state.test.ts`（17 例：core 12×5 矩阵、SQL 守卫 60 格、未知状态 `sold`、forced 类型守卫、admin_reset 活跃出价守卫、first_bid 双时间窗、不存在 id、幂等重跑、advanceStatement 形态、TC-ORD-04 三条 EXISTS 承重链真实入口下标、note 逐字/参数化/三态、SET 列集、first_bid 三组附带列）+ `tests/listing-source-lock.test.ts`（4 例：src 下除 listing-ops 外零匹配、白名单 12 条 sql、判据自检（注释残留/小写/跨行均命中，`deadline_note` / `bid_paused` 两条不命中）、0059 触发器条件与 first_bid 双窗文本成对锁）。
+
+**Changed**
+
+- **12 个写点收成唯一写侧入口**（`1862889`，7 源文件 + 源码锁共 8 文件 +78/−55）：`routes/market.ts`（first_bid）、`market-settle.ts`（activation_match_start / settle_for_review / unbid_expired / activation_price_expired）、`market-intervene.ts`（admin_reset / admin_cancel）、`bypass.ts`（forced_cancel）、`activations.ts`（matched_kept）、`negotiations.ts`（negotiation_closed）、`transfers.ts`（deal_done / review_rejected）。语句位与批内副作用顺序原样：11 处批内原位 + 1 处独立 `.run()`（`market-settle.ts:330`），`activations` 的 `results[2]` 409 判定、delistUnbid / voidExpiredActivation 的 `EXISTS … status='delisted'` 前提、adminVoidBid 的 `NOT EXISTS (active bids)` 依赖、completeTransfer 的 `listingId !== null` 闸均未动；两条非 status 写入（`market-settle.ts:533` note 刷新、`routes/admin/market.ts:105` `bid_paused`）未收编。
+- **源码锁**：`tests/listing-source-lock.test.ts` 对 `src/**/*.ts` 先整文件空白归一化、再大小写不敏感匹配 `UPDATE\s+listings\s+SET\s+status`，除白名单 `src/worker/listing-ops.ts`（12 条 sql 模板）外零命中——注释残留、小写写法、跨行写法同样算违规（全仓仅剩 listing-ops 内 12 条 SQL + 1 行注释）。
+- **`AGENTS.md` 唯一入口行**（:64）：listings 状态转移一律走 `advance`/`advanceStatement`，不许直写 `UPDATE listings SET status`。
+- **评审修复（`da0e808`；7 条 = 3 high / 2 medium / 2 low）**：A/B/C 三条 high 补锁——TC-MX-04（forced_cancel 的 `type='forced'` 守卫；删守卫曾 74 例全绿）、TC-MX-08（admin_reset 的 `NOT EXISTS (active bids)`；删守卫曾 71 例全绿）、TC-MX-09（first_bid 双时间窗；删双窗曾 50 例全绿）；D 源码锁正则补 `i` 标志并改整文件归一化（原逐行匹配漏跨行写法，计划 L11 要求）；E 部分补齐（TC-MX-06/07、TC-COL-02(b)(c)、TC-ORD-04 三条 EXISTS 承重链下标锁，余缺口登记）；F 补 TC-TRG-05（0059 与 first_bid 条件成对）；G 正面结论（运行时零变化成立）无需改。
+
+**裁决：非法转移 409 按零变化原则降级**
+
+- grilling 原定「非法 `(from, cause)` 转移返回 409」**降级**为：SQL 守卫使 `changes=0` 的**静默 no-op**，不新增 409、不新增错误文案。`src/core/listing-state.ts` 的转移表**只是语义真源与测试验证器**——运行时不读表、不判错；执行真源是 `listing-ops` 每条 SQL 的 WHERE 守卫，非法格与改前一样什么都不发生。409 只保留在调用方原有预检处（`market-intervene.ts:84-86` admin_cancel 送审单据，文案「挂牌当前状态是 X，不能作废（已送审的单据请走审核队列驳回）」逐字未动；`routes/market.ts` 出价过线/暂停预检同样原样），调用方既有的 `changes` 分支（`'already'` 等）逐字保留。
+
+**Verification**
+
+- typecheck 三份全清（评审复核记录）；vitest **209 文件 / 3213 例全绿**（脚本统一跑，Start 10:23:31，Duration 113.13s；v6.82.0 基线 207/3202，净 +2 文件 +11 例 = 评审修复前口径 8+3）；评审修复 `da0e808` 再补 10 例后定向复跑 `npx vitest run tests/listing-state.test.ts tests/listing-source-lock.test.ts` = **2 文件 / 21 例全绿**（Start 11:07:48，3.51s），全套按 209 文件 / 3223 例待脚本统一复跑确认。build 无本轮实测记录（零 web/ 改动，计划 Out）；e2e / 生产回读不在本轮。**push：未 push**（本地提交 `81c3f4d` 转移表与唯一入口 → `1862889` 12 写点迁移 → `da0e808` 评审修复；分支 `feat/squad-numbers`）。
+- **变异 4 处**（均还原、还原后全绿）：M1 删 `listing-ops.ts:132` 的 `AND type = 'forced'` → **未命中**（hit=false，`npx vitest run tests/listing-state.test.ts tests/forced-auction.test.ts` 2 文件 / 29 例全过；仓库无 `type='normal'` 调 forced_cancel 的用例、bypass 端点先以 `type!=='forced'` 抛 404、forced-auction 21 例全为 `type='forced'` ⇒ 测试洞，已由 `da0e808` TC-MX-04 补锁，本轮未重跑该变异）；M2 matched_kept 文案「被匹配，球员留队」→「被匹配，球员离队」→ 2 例红（`tests/listing-state.test.ts` 固定文案 5 条逐字锁（修复前 :311）+ `tests/activation-match.test.ts:297`，2 failed / 17 passed，hit=true）；M3 `transfers.ts:883-884` 插回直写 `UPDATE listings SET status='delisted', deadline_note='已成交' WHERE id=? AND status='pending_review'` → 源码锁 1 例红（命中条目 `transfers.ts:884`），白名单 12 条与判据自检 2 例仍绿（1 failed / 2 passed，hit=true）；M4 `src/core/listing-state.ts:48` deal_done 目标 `'delisted'`→`'listed'` → 1 例红（12×5 矩阵 `tests/listing-state.test.ts:224` expected 'listed' to be 'delisted'，1 failed / 7 passed，hit=true）。
+- 运行时零变化逐格核对：12 条 SQL 与原写点逐字等价（状态值、note 文案、附带列、WHERE 守卫、绑定顺序）、批内下标全部保持、两条非 status 写入未误收编、listing-ops 外零 `UPDATE listings SET status` 残留、`advanceStatement` 调用 11 + `advance` 独立 1 = 12。
+
+**登记不改（后续增量）**
+
+- 测试计划 32 例实际落地 21 例（完整覆盖 20 条 / 部分 5 条 / 未落地 7 条）：未落地 TC-MX-10（fromStatus 维度）、TC-ORD-02（settle_for_review 批链路）、TC-ORD-03（金样）、TC-SRC-04（note 刷新 / bid_paused 反向锁）、TC-TRG-01/02/04（触发器行为、端点 409、first_bid 批内下标 4）；计划 §4 十一处变异只执行 4 处（M5–M11 未做）。补锁随下一阶段，逐条对照见测试计划 §9。
+- 第一步登记（已被第二步收编，保留历史）：`81c3f4d` 时 12 个写点「本步未迁移」、原 `UPDATE listings SET status` 仍在 7 文件原位、`AGENTS.md` 规则与存量直写并存——`1862889` 后不再成立。
+- `advanceStatement`/`advance` 在语义卡三参形态上增加首参 `db`（D1 语句必须由具体库构造，任务允许签名自定）；调用方保持语句原批内位置。
+- 本版未新增迁移，`tests/d1.ts` 的 `MIGRATION_FILES` 未动；触发器 0040/0059 与 first_bid 双窗条件现状正确（互为补集、`SET activation_deadline=NULL` 在场、`nowSql()` 三处同口径），仅由 TC-TRG-05 文本锁防单侧漂移，行为未改。
+- 类型断言：`negotiations.ts:987` 与 `transfers.ts:1293` 的 `listingId` 为 `number|null`，调用加 `as number`——仅编译期，运行时仍按原值（含 null）绑定，SQL 以 `id = NULL` 执行即 changes=0，与原 no-op 语义逐字一致。
+
 ## [v6.82.0] · 跨端契约层：`src/contract/` 单一真源（2026-11-09，已上线 Version 5bd80a50）
 
 **Added**

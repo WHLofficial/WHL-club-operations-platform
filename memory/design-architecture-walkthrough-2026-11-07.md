@@ -29,7 +29,7 @@
 | # | 候选 | 一句话 | 状态 |
 | --- | --- | --- | --- |
 | 1 | **球员在途状态读模型（PlayerMarketState）** | 「能不能动」判定收成深模块 flowState/seaVerdicts/ensureNotInFlight，消灭注释协议 | ✅ **已完成上线**（v6.80.0 两批，Version `3679aca4`，2026-11-08） |
-| 2 | **挂牌收口 advance(listingId, cause)** | 5 份关单实现收成唯一写侧入口；transfers.ts:918 的成交回写、状态机 UPDATE 归此 | **已排定为下一候选**（2026-11-09 用户拍板；实测 listings 写点 12 处/8 文件——bypass 强拍取消 / activations 留队 / market-settle ×4 / market-intervene ×2 / negotiations 驳回 / transfers 成交回写+审核驳回 / routes/market 首价落价）；**开工等 #3 收口**；后续排序 #2 → #4（吃 #2 接缝）→ #6，#5 可挂 #6 |
+| 2 | **挂牌收口 advance(listingId, cause)** | 5 份关单实现收成唯一写侧入口；transfers.ts:918 的成交回写、状态机 UPDATE 归此 | ✅ **已实施（v6.83.0，本地未 push）**：`src/core/listing-state.ts` 转移表（12 cause）+ `src/worker/listing-ops.ts` 唯一写侧入口，12 处写点 / 7 文件收编（`81c3f4d` → `1862889` → 评审修复 `da0e808`）；非法转移按零变化降级为 `changes=0` 静默 no-op，core 表仅语义真源与测试验证器，409 只留调用方原有预检；源码锁 listing-ops 外零直写；vitest 209 文件 / 3213 例全绿（修复前口径）+ 定向 21/21；计划 32 例实际 21 例、变异 4/11，缺口登记。细节见 ROADMAP v6.83.0 节与测试计划 §9 对照 |
 | 3 | **共享契约层** | api.ts 262 份手抄类型与 269 处 c.json 之间立一条类型接缝（src/contract/ 单一真源） | ✅ **已实施（v6.82.0，本地未 push）**：六批 batch1–6 落地（24/54/64/70/31/26 型，`0de3f09`…`4e50318`）+ 评审修复 `77d8060`；api.ts 3181→729 行手抄清零改转发、AGENTS.md 契约行入库；vitest 207 文件 / 3202 例全绿；TC-LOCK 源码锁未落地留待办；C（Hono RPC）归远期。细节见 ROADMAP v6.82.0 节与测试计划 §10 对照 |
 | 4 | **PlayerOpsState** | players.status 流转规则的单一 owner（生命周期状态机） | 未立项 |
 | 5 | **ContractPendingChange** | 谈判「待生效 / 关窗后生效」变更的显式建模（现靠合同行 + 台账推断） | 未立项 |
