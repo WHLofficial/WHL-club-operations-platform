@@ -26,6 +26,7 @@ import { hookTierRecompute } from './growth-tier.ts';
 import { voidDemandStatements } from './demand-ops.ts';
 import { queueAllUserClubsNotification } from './notify.ts';
 import { notifyShortlistWatchers } from './shortlist.ts';
+import { advanceStatement } from './listing-ops.ts';
 
 function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
@@ -880,14 +881,7 @@ export async function completeTransfer(
   // findInFlight 把球员当「还在市场流程里」，续约/解约/海捞/上调全被一票否决（生产 2026-11-01
   // 有 14 条这样的脏行）。这里与失败路径（negotiations.ts voidSigningCore、rejectTransfer）对齐收口。
   if (listingId !== null) {
-    statements.push(
-      db
-        .prepare(
-          `UPDATE listings SET status = 'delisted', deadline_note = '已成交'
-            WHERE id = ? AND status IN ('listed', 'bidding', 'matched_pending', 'pending_review')`,
-        )
-        .bind(listingId),
-    );
+    statements.push(advanceStatement(db, listingId, 'deal_done', {}));
   }
   // A 分支 · 非直拒终局（谈崩/低还价/过期）→ 买回计一次 expired 入**新段**（§5.4 第 2 条）。
   // UNIQUE(player_id, season, window_seq) 不允许同窗第二行，故就地把原行重锚成 expired：
@@ -1295,9 +1289,8 @@ export async function rejectTransfer(
     db
       .prepare(`UPDATE bids SET status = 'withdrawn' WHERE listing_id = ? AND status = 'active'`)
       .bind(listingId),
-    db
-      .prepare(`UPDATE listings SET status = 'delisted', deadline_note = '审核驳回' WHERE id = ? AND status = 'pending_review'`)
-      .bind(listingId),
+    // listingId 可能为 null（无关联挂牌）：原语句以 null 绑定即 no-op，这里同值透传（类型仅为编译期断言）
+    advanceStatement(db, listingId as number, 'review_rejected', {}),
     db
       .prepare(`UPDATE players SET status = ?, updated_at = ${nowSql()} WHERE id = ? AND status = 'listed'`)
       .bind(playerStatus, transfer.player_id),

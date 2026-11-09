@@ -16,6 +16,7 @@ import { expireStaleOffers } from './offers.ts';
 import { completeTermination } from './transfers.ts';
 import { queueClubNotification } from './notify.ts';
 import { sqlDisplayName } from '../core/player-name.ts';
+import { advance, advanceStatement } from './listing-ops.ts';
 
 function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
@@ -72,7 +73,7 @@ export async function settleListingForReview(
   const alerts = await detectBidAlerts(db, listing.id);
   const alertsJson = JSON.stringify(alerts);
   const statements = [
-    db.prepare(`UPDATE listings SET status = 'pending_review', match_deadline = NULL, deadline_at = NULL WHERE id = ? AND status = ?`).bind(listing.id, fromStatus),
+    advanceStatement(db, listing.id, 'settle_for_review', { fromStatus }),
     db
       .prepare(
         `INSERT INTO transfers (type, player_id, from_club_id, to_club_id, fee, status, season, window_seq, idempotency_key, created_at)
@@ -174,13 +175,8 @@ export async function delistUnbid(
   const proceedsDestroyed = listing.type === 'forced' && (listing.seller_club_id === null || sellerIsCpu);
   const fee = isActivation || proceedsDestroyed ? 0 : delistFee(listing.ask_price, ctx.delistFeeRate);
   const audit = createAuditStatement(db);
-  const unbidNote = source === 'deadline' ? '截止时刻无人出价' : '窗口结束无人出价';
   const statements = [
-    db
-      .prepare(
-        `UPDATE listings SET status = 'delisted', deadline_note = ? WHERE id = ? AND status = 'listed'`,
-      )
-      .bind(isActivation ? '窗口结束激活方仍未落价，激活无效' : unbidNote, listing.id),
+    advanceStatement(db, listing.id, 'unbid_expired', { isActivation, source }),
     // 评审修复（P1-1）：球员还原/解冻/审计都必须以「本批确实把挂牌改成 delisted」为前提。
     // 与并发出价交错（本句 0 行改）时，旧版会把球员还原成非挂牌态、把冻结放掉、写幻影审计
     db
@@ -284,12 +280,7 @@ export async function voidExpiredActivation(
 ): Promise<boolean> {
   const audit = createAuditStatement(db);
   const statements = [
-    db
-      .prepare(
-        `UPDATE listings SET status = 'delisted', deadline_note = '激活方未在出价窗内落价，激活无效', activation_deadline = NULL
-         WHERE id = ? AND status = 'listed'`,
-      )
-      .bind(listingId),
+    advanceStatement(db, listingId, 'activation_price_expired', {}),
     db
       .prepare(
         `UPDATE players SET status = CASE WHEN (
@@ -336,13 +327,8 @@ async function settleByContractType(
 ): Promise<'settled' | 'matching' | 'already'> {
   if (core.type === 'activation') {
     const matchDeadline = new Date(Date.now() + ctx.matchWindowHours * 3600_000).toISOString();
-    const r = await env.DB.prepare(
-      `UPDATE listings SET status = 'matched_pending', match_deadline = ?, deadline_at = NULL, deadline_note = NULL
-       WHERE id = ? AND status = ?`,
-    )
-      .bind(matchDeadline, core.id, fromStatus)
-      .run();
-    return (r.meta.changes ?? 0) > 0 ? 'matching' : 'already';
+    const changes = await advance(env.DB, core.id, 'activation_match_start', { fromStatus, matchDeadline });
+    return changes > 0 ? 'matching' : 'already';
   }
   return settleListingForReview(env.DB, core, actor, origin, fromStatus);
 }

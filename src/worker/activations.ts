@@ -18,6 +18,7 @@ import { settleListingForReview } from './market-settle.ts';
 import { queueClubNotification } from './notify.ts';
 import { sqlDisplayName } from '../core/player-name.ts';
 import { findActivePromotionSession } from './negotiation-guard.ts';
+import { advanceStatement } from './listing-ops.ts';
 // 契约类型锚点（v6.82.0 第 6 批）：激活回执以 src/contract/batch6.ts 为唯一真源——本地同名
 // interface ActivationResult 删除定义改 import（ok 字面 true 与契约一致，甄别随批补甄别收窄）。
 // 匹配决定回执以 batch5.ts 的 MatchDecisionResult 为真源（第 5 批登记的锚点缺口在本批兑现；
@@ -287,9 +288,7 @@ export async function submitMatch(
         }),
       ),
     // 挂牌落终态（「一球员一活跃挂牌」唯一索引随之释放；成约走 match 单，不再有这单 sale）
-    db
-      .prepare(`UPDATE listings SET status = 'delisted', deadline_note = '被匹配，球员留队' WHERE id = ? AND status = 'matched_pending'`)
-      .bind(listing.id),
+    advanceStatement(db, listing.id, 'matched_kept', {}),
     db.prepare(`UPDATE bids SET status = 'withdrawn' WHERE listing_id = ? AND status = 'active'`).bind(listing.id),
     db
       .prepare(`UPDATE fund_holds SET status = 'released' WHERE ref_type = 'listing' AND ref_id = ? AND status = 'held'`)

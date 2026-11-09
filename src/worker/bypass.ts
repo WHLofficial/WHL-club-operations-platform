@@ -38,6 +38,7 @@ import { findActiveNegotiationSession, findActivePromotionSession } from './nego
 import { listingDemandStatements } from './demand-ops.ts';
 import { ensureNotInFlight, flowState, seaVerdicts } from './player-flow-state.ts';
 import { rowDisplayName } from '../core/player-name.ts';
+import { advanceStatement } from './listing-ops.ts';
 
 function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
@@ -834,9 +835,7 @@ export async function cancelForcedAuction(env: Env, actor: number, listingIdInpu
         .prepare(`UPDATE players SET status = 'normal', updated_at = ${nowSql()} WHERE id = ? AND club_id = ? AND status = 'listed'`)
         .bind(listing.player_id, listing.seller_club_id);
   await db.batch([
-    db
-      .prepare(`UPDATE listings SET status = 'delisted', deadline_note = '管理组取消强制拍卖' WHERE id = ? AND type = 'forced' AND status IN ('listed', 'bidding')`)
-      .bind(listingId),
+    advanceStatement(db, listingId, 'forced_cancel', {}),
     restorePlayer,
     db.prepare(`UPDATE bids SET status = 'withdrawn' WHERE listing_id = ? AND status = 'active'`).bind(listingId),
     db

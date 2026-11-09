@@ -34,6 +34,7 @@ import { POSITION_BY_ID } from '../../core/fc26.ts';
 import { shuffleWithSeed, transferBoardBucket } from '../../core/ad-board.ts';
 import { rowDisplayName, sqlDisplayName } from '../../core/player-name.ts';
 import { settleOverdue } from '../market-settle.ts';
+import { advanceStatement } from '../listing-ops.ts';
 import { rollbackRcChangeForPlayer } from '../bypass.ts';
 import { listingDemandStatements } from '../demand-ops.ts';
 import { notifyShortlistWatchers } from '../shortlist.ts';
@@ -1230,10 +1231,7 @@ app.post('/market/listings/:id/bids', async (c) => {
   }
   // 出价推进带过线守卫（竞价 deadline_at 或激活首价窗 activation_deadline 已过 = 拒绝刷新；
   // 触发器 WHL_BID_REJECT_DEADLINE（0059 版）在冻结语句上先行拦截）
-  const listingAdvance = `UPDATE listings SET status = 'bidding', last_bid_at = ${nowSql()}, activation_deadline = NULL, deadline_at = ?
-     WHERE id = ? AND status IN ('listed', 'bidding')
-       AND (deadline_at IS NULL OR deadline_at > ${nowSql()})
-       AND (activation_deadline IS NULL OR activation_deadline > ${nowSql()})`;
+  // v6.83.0：语句由 listing-ops 唯一构造（first_bid cause），守卫与附带列口径见该文件
   const statements = [
     // 1) 冻结：触发器校验挂牌在竞价/金额达步长/可用资金，任一不满足 ABORT 回滚整批
     c.env.DB.prepare(
@@ -1255,7 +1253,7 @@ app.post('/market/listings/:id/bids', async (c) => {
          AND id NOT IN (SELECT hold_id FROM bids WHERE listing_id = ? AND status = 'active' AND hold_id IS NOT NULL)`,
     ).bind(id, id),
     // 5) 挂牌推进：一律转入公开竞价并落新截止时刻（激活首价落定同样进竞价）
-    c.env.DB.prepare(listingAdvance).bind(nextDeadlineIso, id),
+    advanceStatement(c.env.DB, id, 'first_bid', { deadlineAt: nextDeadlineIso }),
     audit({
       actor: user.id,
       action: 'bid_place',

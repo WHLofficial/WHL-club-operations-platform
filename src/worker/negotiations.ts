@@ -32,6 +32,7 @@ import type { ExpiryOpts } from './expiry-ops.ts';
 import { assertOpOpen } from './ops-schedule.ts';
 import { freeAgentFee, freeAgentFeeGap } from '../core/bypass-rules.ts';
 import { availableBalance, creditLineGuard, ledgerMovement } from './ledger.ts';
+import { advanceStatement } from './listing-ops.ts';
 
 function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
@@ -982,7 +983,8 @@ export async function voidSigningCore(env: Env, sessionId: number, opts: VoidSig
     db.prepare(`UPDATE negotiation_sessions SET status = 'cancelled', settled_at = ${nowSql()} WHERE id = ? AND status = 'active'`).bind(sessionId),
     db.prepare(`UPDATE fund_holds SET status = 'released' WHERE ref_type = 'listing' AND ref_id IS ? AND status = 'held'`).bind(listingId),
     db.prepare(`UPDATE bids SET status = 'withdrawn' WHERE listing_id = ? AND status = 'active'`).bind(listingId),
-    db.prepare(`UPDATE listings SET status = 'delisted', deadline_note = ? WHERE id = ? AND status = 'pending_review'`).bind(opts.deadlineNote, listingId),
+    // listingId 可能为 null（无关联挂牌）：原语句以 null 绑定即 no-op，这里同值透传（类型仅为编译期断言）
+    advanceStatement(db, listingId as number, 'negotiation_closed', { deadlineNote: opts.deadlineNote }),
     playerRestoreSql(db, transfer.player_id),
     db.prepare(`UPDATE transfers SET status = 'rejected' WHERE id = ? AND status = 'signing'`).bind(transfer.id),
     audit({

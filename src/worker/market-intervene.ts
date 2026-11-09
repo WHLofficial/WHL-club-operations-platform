@@ -8,6 +8,7 @@ import { createAuditStatement } from '../lib/audit.ts';
 import { settleListingForReview, type ListingCore } from './market-settle.ts';
 import { forceSettleAtExpected, playerRestoreSql, voidSigningCore } from './negotiations.ts';
 import { revertDeal } from './deal-revert.ts';
+import { advanceStatement } from './listing-ops.ts';
 
 async function loadListingCore(db: Env['DB'], listingId: number): Promise<ListingCore | null> {
   return db
@@ -42,12 +43,7 @@ export async function adminVoidBid(env: Env, bidId: number, actor: number, reaso
       .prepare(`UPDATE fund_holds SET status = 'released' WHERE ref_type = 'listing' AND ref_id = ? AND club_id = ? AND status = 'held'`)
       .bind(bid.listing_id, bid.club_id),
     // 撤空活跃出价时把挂牌送回 listed（否则静默到期结算时会卡成无单据的 pending_review）
-    db
-      .prepare(
-        `UPDATE listings SET status = 'listed', last_bid_at = NULL WHERE id = ? AND status = 'bidding'
-         AND NOT EXISTS (SELECT 1 FROM bids WHERE listing_id = ? AND status = 'active')`,
-      )
-      .bind(bid.listing_id, bid.listing_id),
+    advanceStatement(db, bid.listing_id, 'admin_reset', {}),
     audit({
       actor,
       action: 'admin_bid_void',
@@ -90,12 +86,7 @@ export async function adminForceVoid(env: Env, listingId: number, actor: number,
   }
   const audit = createAuditStatement(db);
   const results = await db.batch([
-    db
-      .prepare(
-        `UPDATE listings SET status = 'delisted', deadline_note = ?, activation_deadline = NULL, match_deadline = NULL
-         WHERE id = ? AND status IN ('listed', 'matched_pending')`,
-      )
-      .bind(`管理组作废：${reason}`, listingId),
+    advanceStatement(db, listingId, 'admin_cancel', { reason }),
     db.prepare(`UPDATE fund_holds SET status = 'released' WHERE ref_type = 'listing' AND ref_id = ? AND status = 'held'`).bind(listingId),
     db.prepare(`UPDATE bids SET status = 'withdrawn' WHERE listing_id = ? AND status = 'active'`).bind(listingId),
     playerRestoreSql(db, listing.player_id),
