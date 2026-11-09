@@ -124,9 +124,9 @@
 
 ---
 
-## v6.82.0 · 跨端契约层：`src/contract/` 单一真源（2026-11-09，本地完成未 push）
+## v6.82.0 · 跨端契约层：`src/contract/` 单一真源（2026-11-09，已上线 Version 5bd80a50）
 
-**状态**：六批施工 + 评审修复完毕，**本地未 push**（本地领先 `origin/main` 8 枚，本版占 7 枚：`0de3f09` 批1 → `f08fa52` 批2 → `8851458` 批3 → `3fefaf0` 批4 → `d91963a` 批5 → `4e50318` 批6 → `77d8060` 评审修复；工作区分支 `feat/squad-numbers`，七枚共 56 文件 +5387/−3630）。判级 **patch**（纯类型层迁移：worker 各端点 `c.json` 载荷逐字节不变、零迁移、零生产写；唯一 web 运行时改动 = B5 删「本次免费」死分支，恒假分支从未渲染、零可见变化）。
+**状态**：六批施工 + 评审修复完毕，**已 push 并上线**（push `6a24793..8a07066 → main` 共 9 枚，本版占 7 枚：`0de3f09` 批1 → `f08fa52` 批2 → `8851458` 批3 → `3fefaf0` 批4 → `d91963a` 批5 → `4e50318` 批6 → `77d8060` 评审修复；工作区分支 `feat/squad-numbers`，七枚共 56 文件 +5387/−3630）。判级 **patch**（纯类型层迁移：worker 各端点 `c.json` 载荷逐字节不变、零迁移、零生产写；唯一 web 运行时改动 = B5 删「本次免费」死分支，恒假分支从未渲染、零可见变化）。
 
 **背景与裁决**：架构走查（2026-11-07）候选 #3——`web/src/lib/api.ts` 手抄 262 型与 269 处 `c.json(...)` 内联构造零机制关联，全仓最大 churn 热点。2026-11-09 定路线 A（共享类型真源，worker handler 返回值标注 + api.ts 改转发，运行时零变化）+ grilling 七问，用户追加「几批全弄清楚一锅端」⇒ 全量一锅端六批（原「首批避开 market 域」的排期注意被一锅端覆盖）；路线 C（Hono RPC）归远期——A 的契约类型就是将来 C 的 `c.json<T>` 标注，A 是 C 的严格前置子集。甄别清单 `scratch/contract-audit-batch1..6.json` 六份（已 gitignore，结论全誊录进测试计划 §6 处置表）。测试计划 `docs/test-plans/v6.82.0-contract-layer.md`（qa-test-planner 口径）。
 
@@ -137,7 +137,7 @@
 - 处置表逐条落地：A 类跟载荷现实（TransferBoardRow ca/pa、MatchEntry 七字段可空、OfferDetailResponse 拆 Omit、OfferEventRow.actor.name 放宽、PlaystyleDetailRow.source 放宽 core 五值等）、B 类 workerExtra 补抄、C 类删谎言（BrandQuote.quotaLeft、SeasonRow.ageCap、RcChangeResult.freeRcChange + DeskTab 死分支）、D 类命名归属、E 类 WageForecast 双用注明、五个 `ok` 收窄字面 `true`；R-WEB 防线三处（TransferBoard null「—」、growth-ocr conceded `number|null`、GrowthEntryPage `?? ''`）。
 - 测试：新增 `DeskTab.rc-change.test.tsx`（TC-B5-01，2 例）+ `TransferBoard.null.test.tsx`（TC-B6-01，3 例）；既有测试文件改动仅两处文本锁搬位（`tests/mobile-baseline.test.ts` / `tests/growth-nongrowable.test.ts` 各 +3/−1，断言目标随真源从 api.ts 搬进 batch2.ts，锁的字段语义不变）。
 
-**验收**：typecheck 三份清（各批施工自跑：B3 记三份全清、B5/B6 记三份自跑全绿、B1 以 tsc 探针实证；B2/B4 无逐字留痕）；vitest **207 文件 / 3202 例全绿**（脚本统一跑；v6.81.0 基线 205/3197，净 +2 文件 +5 例 = 两新测试文件 2+3 例，逐文件数过）；评审 7 条（3 medium / 4 low）修 5 登记 2（`77d8060`：sea 单源接线 + players.ts 补锚、TransferPanelOffer extends 消六值联合三份副本、VenueQuoteContractLock 补消费点——原写法无消费点永不红经评审实证、两处注释订正）；build / e2e / 生产回读无本轮执行记录（计划 Out，零运行时变化）。
+**验收**：typecheck 三份清（各批施工自跑：B3 记三份全清、B5/B6 记三份自跑全绿、B1 以 tsc 探针实证；B2/B4 无逐字留痕）；vitest **207 文件 / 3202 例全绿**（脚本统一跑；v6.81.0 基线 205/3197，净 +2 文件 +5 例 = 两新测试文件 2+3 例，逐文件数过）；push 前门禁复跑 `npm test` 207/3202 全绿 + `npm run build` 成功（主包 `index-CspU_jUI.js` 755.45 kB / gzip 236.85 kB）；评审 7 条（3 medium / 4 low）修 5 登记 2（`77d8060`：sea 单源接线 + players.ts 补锚、TransferPanelOffer extends 消六值联合三份副本、VenueQuoteContractLock 补消费点——原写法无消费点永不红经评审实证、两处注释订正）；e2e 无本轮执行记录（计划 Out，零运行时变化）。**上线**：Version **`5bd80a50-9e3e-4499-aab2-17c89cfc8ab9`** @2026-11-09T01:10:40Z（CF Workers Builds，push `6a24793..8a07066` 9 枚）；回读 5 端点全 200（health / players / market/listings / clubs / squads），线上 `index-CspU_jUI.js` 与本地 dist 一致。
 
 **登记不改（评审 #6/#7 + 各批 registered/deferred，后续增量）**：
 - `bidCount` 必填谎言键（`listingDetailOf` 从不下发、只有 feed 有；web 类型级消费压着、夹具授权未随批下发）——真删除随夹具授权一次做完（评审 #6）。

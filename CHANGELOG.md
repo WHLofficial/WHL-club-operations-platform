@@ -4,7 +4,7 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
-## [v6.82.0] · 跨端契约层：`src/contract/` 单一真源（2026-11-09，本地完成未 push）
+## [v6.82.0] · 跨端契约层：`src/contract/` 单一真源（2026-11-09，已上线 Version 5bd80a50）
 
 **Added**
 
@@ -20,7 +20,7 @@
 
 **Verification**
 
-- typecheck 三份清（各批施工自跑：B3 记三份全清、B5/B6 记三份自跑全绿、B1 以 tsc 探针实证；B2/B4 批内无逐字留痕）；vitest **207 文件 / 3202 例全绿**（脚本统一跑；v6.81.0 基线 205/3197，净 +2 文件 +5 例 = 上述两个新测试文件 2+3 例）；build / e2e / 生产回读无本轮执行记录（计划 Out，零运行时变化）。**push：未 push**（本地领先 `origin/main` 8 枚，本版占 7 枚，工作区分支 `feat/squad-numbers`；七枚提交全仓 56 文件 +5387/−3630）。
+- typecheck 三份清（各批施工自跑：B3 记三份全清、B5/B6 记三份自跑全绿、B1 以 tsc 探针实证；B2/B4 批内无逐字留痕）；vitest **207 文件 / 3202 例全绿**（脚本统一跑；v6.81.0 基线 205/3197，净 +2 文件 +5 例 = 上述两个新测试文件 2+3 例）；push 前门禁复跑 `npm test` 207 文件 / 3202 例全绿、`npm run build` 成功（主包 `index-CspU_jUI.js` 755.45 kB / gzip 236.85 kB）；e2e 无本轮执行记录（计划 Out，零运行时变化）。**push：已 push**（与 v6.81.0 上线记录合并 9 枚，`6a24793..8a07066 → main`，工作区分支 `feat/squad-numbers`；七枚提交全仓 56 文件 +5387/−3630）。**上线：Version `5bd80a50-9e3e-4499-aab2-17c89cfc8ab9`** @2026-11-09T01:10:40Z（CF Workers Builds 自动部署）；生产回读 5 端点全 200（`/api/health`、`/api/players?limit=1`、`/api/market/listings`、`/api/clubs`、`/api/squads`），线上入口资产 `index-CspU_jUI.js` 与本地 dist 逐名一致。
 
 **登记不改（后续增量）**
 
