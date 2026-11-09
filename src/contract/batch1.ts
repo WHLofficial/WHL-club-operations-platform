@@ -8,6 +8,10 @@
 // worker 内部名（WorkbenchListing / DemandCard / PendingContractView / SearchHit 等）不动，
 // 对应关系见各型注释。
 // 纯类型层：只允许 import type（来源限本目录与 src/core），禁止任何运行时导出。
+// TransferPanelListing 的挂牌公共核（含 status/matchPhase 两联合的契约命名化）自 v6.82.0 第 6 批起
+// extends batch6.ts 的 MarketListingBase——字段单源随基型传导（拆基型联动，测试计划 §6.7 #12）。
+
+import type { MarketListingBase } from './batch6.ts';
 
 // ---------------------------------------------------------------------------
 // 转会台（desk / workbench 前台）
@@ -44,39 +48,20 @@ interface TransferPanelOffer {
 
 /** 转会浮层 listing 成员：worker 走 listingDetailOf 装配（market.ts，与 GET /market/listings/:id
  *  详情同口径）+ marketBidPaused。契约内部辅助型（不出 barrel）：
- *  ① bidCount 键的甄别 FieldDiff #1（workerMissing）按「登记 registered、保留必填键原状」处置
- *     —— web 两处类型级消费在本批白名单外，真删除随 B6 拆 MarketListingBase 基型联动，见键注；
- *  ② status / matchPhase 两处字面联合随 B6 的 ListingStatus / MatchPhase 契约命名化后改引用
- *     （甄别核实 worker 全部写值与联合无失配）。 */
-interface TransferPanelListing {
-  id: number;
-  player: { id: number; fcId: number | null; name: string; position: string | null; age: number | null; ca: number | null; pa: number | null };
-  sellerClub: { id: number | null; name: string };
-  type: string;
-  askPrice: number;
-  status: 'listed' | 'bidding' | 'matched_pending' | 'pending_review' | 'delisted';
-  listedAt: string;
-  lastBidAt: string | null;
-  bidPaused: boolean;
-  highestBid: number | null;
-  /** 领先出价方：active 出价的俱乐部，出价历史里每单至多一条 active */
-  highestBidder: { id: number; name: string } | null;
+ *  ① 18 个公共字段自 B6 起 extends batch6.ts 的 MarketListingBase（listingDetailOf 与 feed 逐字
+ *     共用核，勿各自手抄分叉——测试计划 §6.7 #12 拆基型联动）；
+ *  ② status / matchPhase 两处字面联合随 B6 的 ListingStatus / MatchPhase 契约命名化改引用
+ *     （B6 联动已落地，甄别核实 worker 全部写值与联合无失配）；
+ *  ③ bidCount 键的甄别 FieldDiff #1（workerMissing）按「登记 registered、保留必填键原状」处置
+ *     —— B6 拆基型落地时复核：web 类型级消费实际压着键的是 PlayerTransferPanel.test.tsx:47 夹具
+ *     字面量（bidCount:2）与 MarketListingOverlay.tsx:192 OverlayBody 形参（= MarketListing & {…}），
+ *     两文件均不在第 6 批白名单、夹具授权未随 B6 ask 下发 ⇒ 键继续保留登记；web 运行时读点为零
+ *     （读的是 feed，MarketBoardPage.tsx:261）。 */
+interface TransferPanelListing extends MarketListingBase {
   /** ⚠️ 甄别 FieldDiff #1（workerMissing，已登记 registered）：worker 该路径（listingDetailOf 装配）
    *  不下发 bidCount，只有 feed（GET /market/listings）才有；api 手抄经 MarketListingDetail['listing']
-   *  继承出的必填键是谎言。但 web 有两处类型级消费都压着它：PlayerTransferPanel.tsx:112 把本型
-   *  传进 canBidOf（形参 = MarketListingDetail['listing']，要求 bidCount:number）、
-   *  PlayerTransferPanel.test.tsx:47 夹具字面量写 bidCount:2（既有测试文件零改动硬线）——两个文件
-   *  均在第 1 批文件白名单外，且拆基型（MarketListingBase）按计划归 B6 联动 ⇒ 本批保留必填键
-   *  原状并登记，真删除随 B6 拆基型 + 夹具授权一并落地。web 运行时读点为零（读的是 feed）。 */
+   *  继承出的必填键是谎言（处置沿革与消费点见本型头注 ③）。 */
   bidCount: number;
-  activatedBy: number | null;
-  activationDeadline: string | null;
-  matchDeadline: string | null;
-  /** 激活单的撮合相位；worker 只在 type==='activation' 分支产出，非激活单恒 null */
-  matchPhase: 'first_bid' | 'matching' | null;
-  firstBidPending: boolean;
-  deadlineAt: string | null;
-  deadlineNote: string | null;
   releaseFee: number | null;
   windowOpen: boolean;
   nextMinBid: number;

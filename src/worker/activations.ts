@@ -18,6 +18,13 @@ import { settleListingForReview } from './market-settle.ts';
 import { queueClubNotification } from './notify.ts';
 import { sqlDisplayName } from '../core/player-name.ts';
 import { findActivePromotionSession } from './negotiation-guard.ts';
+// 契约类型锚点（v6.82.0 第 6 批）：激活回执以 src/contract/batch6.ts 为唯一真源——本地同名
+// interface ActivationResult 删除定义改 import（ok 字面 true 与契约一致，甄别随批补甄别收窄）。
+// 匹配决定回执以 batch5.ts 的 MatchDecisionResult 为真源（第 5 批登记的锚点缺口在本批兑现；
+// worker 内部名 MatchResult 退役——全仓无外部 import，本会话 grep 实证），submitMatch 的
+// return 标注即写侧编译期锁。
+import type { ActivationResult } from '../contract/batch6.ts';
+import type { MatchDecisionResult } from '../contract/batch5.ts';
 
 function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
@@ -26,13 +33,8 @@ function nowSql() {
 // 激活证据截图 key（v6.4.0 改动 4）：POST /api/media/activation 生成，路径里的 club_id 必须是激活方自己
 const PROOF_KEY_PATTERN = /^activation\/(\d+)\/[A-Za-z0-9._-]+$/;
 
-export interface ActivationResult {
-  ok: true;
-  listingId: number;
-  askPrice: number;
-  kind: 'trainee' | 'normal';
-  firstBidDeadline: string;
-}
+// ActivationResult 已迁 src/contract/batch6.ts（v6.82.0 第 6 批；同名定义删除改 import——
+// worker 本地声明的 ok: true 与契约逐字一致，createActivation 的 return 标注即写侧编译期锁）。
 
 // 激活挂牌：训练营与普通球员统一入口（附录 A POST /api/transfers/activation）。
 // v6.4.0 改动 4：proofMediaKey 必填（激活方上传的 QQ 通知截图）——激活时就要证明已在 QQ
@@ -182,12 +184,8 @@ export async function createActivation(
   return { ok: true, listingId, askPrice, kind: isTrainee ? 'trainee' : 'normal', firstBidDeadline: deadline.toISOString() };
 }
 
-export interface MatchResult {
-  ok: true;
-  decision: 'match' | 'pass';
-  newReleaseFee?: number;
-  diff?: number;
-}
+// MatchResult 已迁 src/contract/batch5.ts（v6.82.0 第 5 批，契约名 MatchDecisionResult——
+// 内部名退役，第 5 批登记的「锚点待落：activations.ts」在本批兑现）。
 
 /**
  * 被激活方的匹配决定（24h 窗内）：newReleaseFee 缺省 = 放行（按竞价最高价成交）。
@@ -201,7 +199,7 @@ export async function submitMatch(
   actor: number,
   listingIdInput: unknown,
   newFeeInput: unknown,
-): Promise<MatchResult> {
+): Promise<MatchDecisionResult> {
   const db = env.DB;
   const listingId = Number(listingIdInput);
   if (!Number.isInteger(listingId) || listingId <= 0) throw new HttpError(400, 'listingId 应为挂牌 ID');

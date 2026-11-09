@@ -45,17 +45,26 @@ function statusOf(row: TransferBoardRow) {
   return transferStatusOf({ ...row, transferListed: true });
 }
 
+// 数值格子公共防线（v6.82.0 第 6 批 R-WEB，测试计划 §6.7 #6/#7）：TransferBoardRow.ca/pa 契约
+// 可空化（players 列可空、端点 SQL 无 COALESCE，0001_init.sql:12-13），attrClass 形参是 number——
+// 先挡 null：空值渲染「—」且不吃 0-99 数值色阶；非 null 路径的类名与文本逐字节不变。
+function attrNum(v: number | null): { cls: string; text: string } {
+  return v == null ? { cls: '', text: '—' } : { cls: attrClass(v), text: String(v) };
+}
+
 // CA / PA 大数字（沿用既有 .attr-* 色阶）
 function Rail({ row }: { row: TransferBoardRow }) {
+  const ca = attrNum(row.ca);
+  const pa = attrNum(row.pa);
   return (
     <div className="adb-rail">
       <div className="adb-rail-cell">
         <span className="adb-rail-lab">CA</span>
-        <span className={`adb-rail-num ${attrClass(row.ca)}`}>{row.ca}</span>
+        <span className={`adb-rail-num ${ca.cls}`}>{ca.text}</span>
       </div>
       <div className="adb-rail-cell">
         <span className="adb-rail-lab">PA</span>
-        <span className={`adb-rail-num ${attrClass(row.pa)}`}>{row.pa}</span>
+        <span className={`adb-rail-num ${pa.cls}`}>{pa.text}</span>
       </div>
     </div>
   );
@@ -148,6 +157,8 @@ function FeaturedCard({ row, onBid }: { row: TransferBoardRow; onBid: (row: Tran
 // 迷你卡（在售市场页顶部小卡片用）：整张是球员链接，右上角图标只作状态标记
 function MiniCard({ row }: { row: TransferBoardRow }) {
   const cls = `adb-mini${row.emphasis === 1 ? ' emph-1' : ''}${row.emphasis === 2 ? ' emph-2' : ''}`;
+  const caNum = attrNum(row.ca);
+  const paNum = attrNum(row.pa);
   return (
     <Link className={cls} to={playerPath(row)}>
       <span className="adb-mini-head">
@@ -160,7 +171,7 @@ function MiniCard({ row }: { row: TransferBoardRow }) {
       <span className="adb-mini-sub">{subline(row)}</span>
       <span className="adb-mini-foot">
         <span className="adb-mini-nums">
-          CA <b className={attrClass(row.ca)}>{row.ca}</b> PA <b className={attrClass(row.pa)}>{row.pa}</b>
+          CA <b className={caNum.cls}>{caNum.text}</b> PA <b className={paNum.cls}>{paNum.text}</b>
         </span>
         <span className="adb-mini-price">{amount(row.listPrice)}</span>
       </span>

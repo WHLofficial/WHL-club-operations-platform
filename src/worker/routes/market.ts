@@ -40,6 +40,24 @@ import { notifyShortlistWatchers } from '../shortlist.ts';
 import { createActivation } from '../activations.ts';
 import { queueClubNotification } from '../notify.ts';
 import { getBoundClub, assertTradable } from '../binding.ts';
+// 契约类型锚点（v6.82.0 第 6 批）：市场域响应以 src/contract/batch6.ts 为唯一真源
+// （c.json 泛型 / 装配 return 标注 = 写侧编译期锁；甄别 FieldDiff 处置见契约型注）。
+import type {
+  ActivationReportResult,
+  ActivationResult,
+  ActivatableResponse,
+  BidPlaceResult,
+  ListingProofResponse,
+  ListingStatus,
+  MarketDealsResponse,
+  MarketListingCreateResult,
+  MarketListingDetail,
+  MarketListings,
+  MyBidRow,
+  RumorsResponse,
+  SeaLookupResponse,
+  TransferBoardResponse,
+} from '../../contract/batch6.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -56,7 +74,9 @@ export interface ListingRow {
   seller_club_id: number | null;
   type: string;
   ask_price: number;
-  status: string;
+  /** listings.status 五值（contract/batch6.ts ListingStatus）：feed 查询有 statusFilter 白名单、
+   *  详情/浮层查询无过滤但写侧只落这五值（甄别核实无失配）——行类型收窄仅编译期，不改载荷字节。 */
+  status: ListingStatus;
   listed_at: string;
   last_bid_at: string | null;
   listed_day: string | null;
@@ -161,7 +181,8 @@ app.get('/market/listings', async (c) => {
   ]);
   const rows = rowsRes;
   const now = new Date();
-  return c.json({
+  // 契约锚点（v6.82.0 第 6 批）：feed 响应以 contract/batch6.ts MarketListings 为真源
+  return c.json<MarketListings>({
     listings: rows.results.map((r) => {
       let deadlineAt: string | null = null;
       // 截止绝对时刻化（v6.4.0）：优先读落库列（出价时按 bidDeadline 算定），存量行 NULL 回落实时算。
@@ -344,7 +365,8 @@ app.post('/market/listings', async (c) => {
     deadline: firstDeadline,
   });
 
-  return c.json({ ok: true, listingId, min: bounds.min, max: bounds.max }, 201);
+  // 契约锚点（v6.82.0 第 6 批）：挂牌回执补具名（甄别 notes P2，web SideOps.tsx 内联不动）
+  return c.json<MarketListingCreateResult>({ ok: true, listingId, min: bounds.min, max: bounds.max }, 201);
 });
 
 // GET /api/market/rumors —— 传闻流（v6.18.0 公开情报）：窗口种子固定的真/假混排传闻（6~8 条）。
@@ -359,7 +381,8 @@ app.get('/market/rumors', async (c) => {
     () => buildRumors(c.env.DB, win),
     { scope: 'market', env: c.env, ctx: waitUntilOf(c) },
   );
-  return c.json({ rumors: data });
+  // 契约锚点（v6.82.0 第 6 批）：rumors.ts buildRumors 的 return 标注已指向契约 RumorItem
+  return c.json<RumorsResponse>({ rumors: data });
 });
 
 // GET /api/market/deals —— 最近成交（v6.18.0 公开情报）：已完成单据，默认最近 50 条。
@@ -418,7 +441,9 @@ app.get('/market/deals', async (c) => {
   const data = await cachedJson(
     cacheKey,
     ttlForScope('market', c.env.PUBLIC_CACHE_TTL_MS),
-    async () => {
+    // 契约锚点（v6.82.0 第 6 批）：deals 响应以 contract/batch6.ts MarketDealsResponse 为真源
+    // （nextCursor/hasMore 与行级三快照键按 FieldDiff #1-#5 补抄进契约）
+    async (): Promise<MarketDealsResponse> => {
       // 多取 1 行探路（peek）：有第 limit+1 行才回 nextCursor，边界处不会把「刚好取完」误报成还有下一页
       const rows = await c.env.DB.prepare(
         `SELECT t.id, t.type, t.player_id, t.fee, t.extra_fee, t.season, t.window_seq, t.completed_at,
@@ -539,7 +564,9 @@ app.get('/market/transfer-board', async (c) => {
   const data = await cachedJson(
     `market-transfer-board:${limit}`,
     ttlForScope('market', c.env.PUBLIC_CACHE_TTL_MS),
-    async () => {
+    // 契约锚点（v6.82.0 第 6 批）：board 响应以 contract/batch6.ts TransferBoardResponse 为真源
+    // （ca/pa 按 FieldDiff #6/#7 可空化——列可空无 COALESCE，api 手抄的非空声明是谎言）
+    async (): Promise<TransferBoardResponse> => {
       const rows = await c.env.DB.prepare(
         `SELECT p.id, p.uid, p.fc_id, p.name, p.display_name, p.club_id, p.position, p.age, p.ca, p.pa,
                 p.list_price, p.transfer_listed_at, p.status, p.not_for_sale,
@@ -616,8 +643,9 @@ app.get('/market/transfer-board', async (c) => {
           listPrice: r.list_price,
           releaseFee: r.release_fee,
           listedAt: r.transfer_listed_at,
-          // tier 只存 1/2，读取钳 0..2、越界按 0（普通）处理
-          emphasis: r.emphasis === 1 || r.emphasis === 2 ? r.emphasis : 0,
+          // tier 只存 1/2，读取钳 0..2、越界按 0（普通）处理；as 0|1|2 仅编译期收窄
+          // （player_promotions.tier 列无 CHECK、值域由写侧纪律保证），不改运行时判定
+          emphasis: (r.emphasis === 1 || r.emphasis === 2 ? r.emphasis : 0) as 0 | 1 | 2,
           emphasisUntil: r.emphasis_until,
           // 与 /api/players 列表行同名字段，供前端复用 transferStatusOf
           status: r.status,
@@ -682,7 +710,7 @@ app.get('/market/sea-lookup', async (c) => {
       .all<SeaLookupRow>();
     candidates = rows.results;
   }
-  if (candidates.length === 0) return c.json({ results: [] });
+  if (candidates.length === 0) return c.json<SeaLookupResponse>({ results: [] });
 
   // 资格判定整体交给 seaVerdicts（v6.80.0 收编批量副本）：cpuIds / 本窗解约禁签 / 在途三查批量装载，
   // 开窗批内 ≤5 条查询与改前持平；win=null 时零查询、每行拦在 window 关。响应逐格不变：
@@ -693,7 +721,9 @@ app.get('/market/sea-lookup', async (c) => {
     win,
   );
 
-  return c.json({
+  // 契约锚点（v6.82.0 第 6 批）：sea-lookup 响应以 contract/batch6.ts SeaLookupResponse 为真源
+  // （本文件同名 SeaLookupRow 是 DB 行形状、非契约，互不相干）
+  return c.json<SeaLookupResponse>({
     results: candidates.map((r) => {
       const verdict = verdicts.get(r.id)!;
       return {
@@ -719,7 +749,8 @@ app.get('/market/sea-lookup', async (c) => {
 app.get('/market/activatable', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
   const club = await getBoundClub(c.env, user.id, c.req.raw);
-  if (!club) return c.json({ club: null, players: [] });
+  // 契约锚点（v6.82.0 第 6 批）：activatable 响应以 contract/batch6.ts ActivatableResponse 为真源
+  if (!club) return c.json<ActivatableResponse>({ club: null, players: [] });
 
   const mode = c.req.query('mode');
   const statusSql = mode === 'trainee' ? `'trainee'` : `'normal', 'trainee'`;
@@ -761,7 +792,8 @@ app.get('/market/activatable', async (c) => {
       status: string;
       club_id: number;
       club_name: string;
-      contract_type: string;
+      /** contracts.contract_type 二值（0001_init.sql:59 列注释 formal/trainee）——行类型收窄仅编译期 */
+      contract_type: 'formal' | 'trainee';
       release_fee: number | null;
       protection_ticks: number | null;
       service_ticks: number | null;
@@ -789,7 +821,7 @@ app.get('/market/activatable', async (c) => {
     }
   }
 
-  return c.json({
+  return c.json<ActivatableResponse>({
     club: { id: club.id, name: club.name },
     players: rows.results.map((r) => ({
       id: r.id,
@@ -827,7 +859,9 @@ app.post('/market/activations', async (c) => {
 
   const body = (await c.req.raw.json().catch(() => null)) as { playerId?: unknown; proofMediaKey?: unknown } | null;
   if (!body) throw new HttpError(400, '请求格式不对');
-  return c.json(await createActivation(c.env, club.id, user.id, body.playerId, body.proofMediaKey), 201);
+  // 契约锚点（v6.82.0 第 6 批）：activations.ts createActivation 的 return 标注已指向契约
+  // ActivationResult（本地同名定义删除改 import），这里泛型是第二道锁
+  return c.json<ActivationResult>(await createActivation(c.env, club.id, user.id, body.playerId, body.proofMediaKey), 201);
 });
 
 // POST /api/market/listings/:id/activation-report —— 激活通知举报（v6.4.0 改动 4，仅被激活方）
@@ -875,7 +909,8 @@ app.post('/market/listings/:id/activation-report', async (c) => {
   ]);
   if ((results[0].meta.changes ?? 0) !== 1) throw new HttpError(409, '举报没落库，刷新再试');
   await queueClubNotification(c.env, listing.activated_by, 'activation_reported', { listingId: id, playerId: listing.player_id });
-  return c.json({ ok: true }, 201);
+  // 契约锚点（v6.82.0 第 6 批）：举报回执补具名（甄别 notes P2）
+  return c.json<ActivationReportResult>({ ok: true }, 201);
 });
 
 // GET /api/market/listings/:id/proof —— 激活凭证地址（v6.68.2 期 C，Q12 裁决）
@@ -894,7 +929,8 @@ app.get('/market/listings/:id/proof', async (c) => {
     if (!club || row.seller_club_id !== club.id) throw new HttpError(403, '只有被激活方可以看这份凭证');
   }
   if (!row.activation_proof) throw new HttpError(404, '这单激活没有上传凭证');
-  return c.json({ url: `/api/media/${row.activation_proof}` });
+  // 契约锚点（v6.82.0 第 6 批）：凭证地址回执补具名（甄别 notes P2）
+  return c.json<ListingProofResponse>({ url: `/api/media/${row.activation_proof}` });
 });
 
 export interface ListingBidRow {
@@ -921,7 +957,9 @@ export function listingDetailOf(
     windowOpen: boolean;
     bids: ListingBidRow[];
   },
-) {
+  // 契约锚点（v6.82.0 第 6 批）：详情装配以 contract/batch6.ts MarketListingDetail 为真源——
+  // 本函数同时服务 GET /market/listings/:id 与球员转会浮层（desk.ts:302 复用），单一装配锁两边
+): MarketListingDetail {
   const { highest, contract, ctx, windowOpen, bids } = input;
 
   let deadlineAt: string | null = null;
@@ -950,6 +988,9 @@ export function listingDetailOf(
 
   return {
     marketBidPaused: input.marketBidPaused,
+    // ⚠️ 编译期断言（同 desk.ts transfer-panel 的先例）：契约 detail listing 上的 bidCount 是登记过的
+    // workerMissing（web 类型级消费压着键、文件在本批白名单外，见 contract/batch6.ts 型注）——本装配
+    // 从不下发它，`as` 仅编译期对齐契约形状，不改载荷字节。
     listing: {
       id: listing.id,
       player: { id: listing.player_id, fcId: listing.player_fc_id, name: listing.player_name, position: listing.position, age: listing.age, ca: listing.ca, pa: listing.pa },
@@ -981,7 +1022,7 @@ export function listingDetailOf(
               : null
           : null,
       firstBidPending: listing.type === 'activation' && bids.length === 0 && listing.activated_by !== null,
-    },
+    } as MarketListingDetail['listing'],
     bids: bids.map((b) => ({
       id: b.id,
       clubId: b.club_id,
@@ -1247,8 +1288,14 @@ app.post('/market/listings/:id/bids', async (c) => {
     .bind(id, club.id)
     .first<{ id: number; amount: number; created_at: string }>();
 
-  // v6.24.0：激活方落首价不再当场收口——转入公开竞价，截止后由惰性结算按合同类型分流
-  return c.json({ ok: true, bid, deadlineAt: nextDeadlineIso, ...(isActivation ? { matchPhase: 'bidding' } : {}) }, 201);
+  // v6.24.0：激活方落首价不再当场收口——转入公开竞价，截止后由惰性结算按合同类型分流。
+  // 契约锚点（v6.82.0 第 6 批）：出价回执以 contract/batch6.ts BidPlaceResult 为真源；
+  // `bid!` 与 `as const` 仅编译期收窄——bid 是刚 INSERT 成功后点查的行（results[1].meta.changes
+  // 已守卫，D1 first() 泛型恒带 null），不改载荷字节。
+  return c.json<BidPlaceResult>(
+    { ok: true, bid: bid!, deadlineAt: nextDeadlineIso, ...(isActivation ? { matchPhase: 'bidding' as const } : {}) },
+    201,
+  );
 });
 
 // GET /api/me/bids —— 我的出价（含冻结状态章）
@@ -1284,8 +1331,10 @@ app.get('/me/bids', async (c) => {
       amount: number;
       created_at: string;
       bid_status: string;
-      hold_status: string | null;
-      listing_status: string;
+      /** fund_holds.status 三值（0001_init.sql 注释）+ LEFT JOIN 无冻结行 null——行类型收窄仅编译期 */
+      hold_status: 'held' | 'released' | 'settled' | null;
+      /** listings.status 五值（写侧纪律，见 ListingRow 注）——行类型收窄仅编译期 */
+      listing_status: ListingStatus;
       ask_price: number;
       player_id: number;
       player_fc_id: number | null;
@@ -1295,9 +1344,11 @@ app.get('/me/bids', async (c) => {
       pa: number | null;
       seller_name: string;
     }>();
+  // 契约锚点（v6.82.0 第 6 批）：行级标注锁 MyBidRow 全形（contract/batch6.ts）；容器 {club,bids}
+  // 无具名契约类型（甄别 notes：web queries.ts 内联）
   return c.json({
     club: { id: club.id, name: club.name },
-    bids: rows.results.map((r) => ({
+    bids: rows.results.map((r): MyBidRow => ({
       id: r.id,
       listingId: r.listing_id,
       amount: r.amount,

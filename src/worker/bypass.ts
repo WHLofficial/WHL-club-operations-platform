@@ -26,6 +26,11 @@ import {
 // cancelOwnTransfer / createFreeAgent 的 return 标注即写侧编译期锁。FieldDiff 处置见契约型注
 // （freeRcChange 从响应删除——免费通道只落 evidence 供审核豁免，HTTP 响应从不携带；ok 字面 true）。
 import type { CancelOwnResult, FreeAgentResult, RcChangeResult, TerminationResult } from '../contract/batch5.ts';
+// 契约类型锚点（v6.82.0 第 6 批）：强拍状态机 DTO 三型以 src/contract/batch6.ts 为唯一真源——
+// 同名内部接口删除定义改 import（同第 5 批做法）。ForcedAuctionInspection 是 worker 内部名
+// （naming D 处置：契约名 = web 名 ForcedAuctionPreview），保留原名引用契约类型；
+// inspectForcedAuction / createForcedAuction 的 return 标注即写侧编译期锁。
+import type { ForcedAuctionBlocker, ForcedAuctionReference, ForcedAuctionResult } from '../contract/batch6.ts';
 
 export type { CancelOwnResult, FreeAgentResult, RcChangeResult, TerminationResult };
 import { assertExpectedWageReady, openNegotiationSession, voidSigningCore, type OpenSessionOptions } from './negotiations.ts';
@@ -589,46 +594,16 @@ export async function createFreeAgent(
 }
 
 // ---- 强制拍卖（规则 4.4.5）：准入失败触发，管理方以 1m 挂牌，整单税 50% ----
+// ForcedAuctionReference / ForcedAuctionBlocker / ForcedAuctionResult 已迁 src/contract/batch6.ts
+// （v6.82.0 第 6 批；同名定义删除改 import，FieldDiff #9 ok 收窄 true 见契约型注），
+// inspectForcedAuction / createForcedAuction 的 return 标注即写侧编译期锁。
 
-/** 人选参考值（v6.51.0：队内非门将 CA 前六只作参考，不再是人选硬条件） */
-export interface ForcedAuctionReference {
-  playerId: number;
-  /** EA 球员 ID（球员页 URL 上的号）；可能为空 */
-  fcId: number | null;
-  playerName: string;
-  clubId: number | null;
-  clubName: string | null;
-  position: string | null;
-  ca: number | null;
-  /** 门将（前六参考口径不含门将） */
-  isGk: boolean;
-  /** 队内非门将 CA 排名（并列取并列最优名次）；门将 / 缺 CA 为 null */
-  caRank: number | null;
-  /** 队内非门将第六名的 CA（前六参考线）；有 CA 的非门将不足六人为 null */
-  topSixLine: number | null;
-  /** 是否落在队内非门将 CA 前六（参考值，不强制）；门将 / 缺 CA 为 null */
-  inTopSix: boolean | null;
-  /** 队内有 CA 的非门将人数 */
-  nonGkWithCa: number;
-}
-
-export interface ForcedAuctionBlocker {
-  status: number;
-  message: string;
-  errCode?: string;
-}
-
+/** 预检容器：worker 内部名（契约名 = web 名 ForcedAuctionPreview，naming D 处置——
+ *  字段形状 {reference, blockers} 全同，见 contract/batch6.ts）。 */
 export interface ForcedAuctionInspection {
   reference: ForcedAuctionReference;
   /** 现在挂牌会被拒的原因（按闸门顺序；空数组 = 可挂） */
   blockers: ForcedAuctionBlocker[];
-}
-
-export interface ForcedAuctionResult {
-  ok: true;
-  listingId: number;
-  askPrice: number;
-  reference: ForcedAuctionReference;
 }
 
 /**

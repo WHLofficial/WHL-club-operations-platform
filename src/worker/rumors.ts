@@ -12,6 +12,9 @@
 import { seededUnit } from './venue-ops.ts';
 import { sqlDisplayName } from '../core/player-name.ts';
 import { getOpenWindow, getVisibleSeason } from './seasons.ts';
+// 契约类型锚点（v6.82.0 第 6 批）：传闻行以 src/contract/batch6.ts 为唯一真源——本地同名
+// interface RumorItem 删除定义改 import（形状逐字一致），buildRumors 的 return 标注即写侧编译期锁。
+import type { RumorItem } from '../contract/batch6.ts';
 
 export interface RumorSeedWindow {
   season: number;
@@ -26,15 +29,7 @@ export async function resolveRumorWindow(db: D1Database): Promise<RumorSeedWindo
   return { season: season ?? 0, windowSeq: 0 };
 }
 
-export interface RumorItem {
-  /** 稳定 id（种子派生）：r{season}-{window}-{slot} */
-  id: string;
-  text: string;
-  /** 内嵌链接目标：玩家点过去自行查证真假 */
-  playerId: number;
-  playerName: string;
-  clubName: string;
-}
+// RumorItem 已迁 src/contract/batch6.ts（v6.82.0 第 6 批；形状逐字一致——稳定 id 注释见契约型注）。
 
 const RUMOR_COUNT = 8;
 const FAKE_PLAYER_POOL = 16;

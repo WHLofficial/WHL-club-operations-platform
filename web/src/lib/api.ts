@@ -297,6 +297,43 @@ export type {
   TraineeSignResult,
   TransferType,
 } from '../../../src/contract/batch5.ts';
+// 第 6 批（v6.82.0）：market（listings / bids / 激活 / 强拍状态机 DTO）——挂牌状态机两联合与
+// feed/详情/浮层拆基型（MarketListingBase 单源）、激活与出价回执、我的出价、市场情报四端点、
+// 广告板与海捞速查、可激活名单、强拍四件套（§6.0 归属本批）+ P2 补具名回执四型。字段跟随
+// worker c.json 载荷现实，甄别与 FieldDiff 处置见契约型注（MarketDealsRow 三快照键 + 分页两键
+// 补抄、TransferBoardRow.ca/pa 可空化、ForcedAuctionResult.ok 收窄 true、ForcedAuctionPreview
+// ← worker 内部名 ForcedAuctionInspection；随批补甄别两处：ActivationResult.ok / BidPlaceResult.ok
+// 收窄 true、BidPlaceResult.bid 内键按载荷现实为 snake_case created_at）。MarketRound 四件套
+// （招商轮域）已归第 3 批、DeskSummary / TransferPanelResponse 已归第 1 批，均不重复转发。
+export type {
+  ActivationReportResult,
+  ActivationResult,
+  ActivatablePlayer,
+  ActivatableResponse,
+  BidPlaceResult,
+  ForcedAuctionBlocker,
+  ForcedAuctionCancelResult,
+  ForcedAuctionPreview,
+  ForcedAuctionReference,
+  ForcedAuctionResult,
+  ListingProofResponse,
+  ListingStatus,
+  MarketDealsResponse,
+  MarketDealsRow,
+  MarketListing,
+  MarketListingBase,
+  MarketListingCreateResult,
+  MarketListingDetail,
+  MarketListings,
+  MatchPhase,
+  MyBidRow,
+  RumorItem,
+  RumorsResponse,
+  SeaLookupResponse,
+  SeaLookupRow,
+  TransferBoardResponse,
+  TransferBoardRow,
+} from '../../../src/contract/batch6.ts';
 
 export interface MeUser {
   id: number;
@@ -457,90 +494,15 @@ export function mediaUrl(key: string | null | undefined): string | null {
 // ComplianceReport 已迁 src/contract/batch2.ts（v6.82.0 第 2 批，§6.8 补录）。
 
 // ---- v0.4.0 DTO（附录 A〔3〕：转会市场挂牌竞价链）----
-
-export type ListingStatus = 'listed' | 'bidding' | 'matched_pending' | 'pending_review' | 'delisted';
-
-// MatchPhase 未随第 4 批迁移：测试计划 §6.0 归属表固定归 B6（真源 routes/market.ts:200-207，
-// 批 1 TransferPanelListing.matchPhase 内联联合同轮改引用），手抄原地保留。
-
-export type MatchPhase = 'first_bid' | 'matching' | null;
-
-export interface MarketListing {
-  id: number;
-  player: { id: number; fcId: number | null; name: string; position: string | null; age: number | null; ca: number | null; pa: number | null };
-  sellerClub: { id: number | null; name: string };
-  type: string;
-  askPrice: number;
-  status: ListingStatus;
-  listedAt: string;
-  lastBidAt: string | null;
-  bidPaused: boolean;
-  highestBid: number | null;
-  /** 领先出价方（v6.4.0 改动 5）：active 出价的俱乐部，出价历史里每单至多一条 active */
-  highestBidder: { id: number; name: string } | null;
-  bidCount: number;
-  activatedBy: number | null;
-  activationDeadline: string | null;
-  matchDeadline: string | null;
-  matchPhase: MatchPhase;
-  firstBidPending: boolean;
-  deadlineAt: string | null;
-  deadlineNote: string | null;
-}
-
-export interface MarketListings {
-  listings: MarketListing[];
-  cursor: number | null;
-}
-
-export interface MarketListingDetail {
-  marketBidPaused: boolean;
-  listing: MarketListing & {
-    releaseFee: number | null;
-    windowOpen: boolean;
-    nextMinBid: number;
-    bidStepMin: number;
-    activatorName: string | null;
-  };
-  bids: { id: number; clubId: number; clubName: string; amount: number; createdAt: string; status: string }[];
-}
+// ListingStatus / MatchPhase / MarketListing / MarketListings / MarketListingDetail / ActivationResult /
+// BidPlaceResult / MyBidRow 已迁 src/contract/batch6.ts（v6.82.0 第 6 批；两联合真源化、feed/详情
+// 拆基型 MarketListingBase 单源、ActivationResult.ok / BidPlaceResult.ok 收窄 true、bid 内键按载荷
+// 现实为 created_at、detail listing 的 bidCount 登记保留——FieldDiff 与随批补甄别处置见契约型注），
+// 本文件只 re-export（见顶部契约 re-export 区）。
 
 /** 球员转会浮层（v6.74.0 期 C，设计 §6.1）：球员页状态条 / 浮层 / 转会台行展开共用一份响应。
  *  TransferPanelResponse 已迁 src/contract/batch1.ts（v6.82.0 第 1 批；listing 不含 feed 专有
  *  bidCount、settled.wage 为 number|null，甄别 FieldDiff #1/#2 处置见契约型注）。 */
-
-export interface ActivationResult {
-  ok: boolean;
-  listingId: number;
-  askPrice: number;
-  kind: 'trainee' | 'normal';
-  firstBidDeadline: string;
-}
-
-export interface BidPlaceResult {
-  ok: boolean;
-  bid: { id: number; amount: number; createdAt: string };
-  /** 落定后刷新的绝对截止时刻（激活首价落定即转入公开竞价，同口径刷新；存量无 listed_day 时为 null） */
-  deadlineAt: string | null;
-  /** 激活单落首价后的去向（v6.24.0）：bidding = 已转入公开竞价，截止后由结算按合同类型分流 */
-  matchPhase?: 'bidding';
-}
-
-export interface MyBidRow {
-  id: number;
-  listingId: number;
-  amount: number;
-  createdAt: string;
-  status: string;
-  holdStatus: 'held' | 'released' | 'settled' | null;
-  listingStatus: ListingStatus;
-  askPrice: number;
-  player: { id: number; fcId: number | null; name: string; position: string | null; ca: number | null; pa: number | null };
-  sellerClubName: string;
-}
-
-/** 转会台待办汇总（v6.73.0 期 B）：导航角标 / 桌内待办条共用；未绑队全 0。
- *  DeskSummary 已迁 src/contract/batch1.ts（v6.82.0 第 1 批）。 */
 
 // AdminReviewRow / AdminReviews / AdminReviewBatchResult 已迁 src/contract/batch4.ts
 // （v6.82.0 第 4 批；批量回执 ok 恒 true 收窄见契约型注），本文件只 re-export。
@@ -569,122 +531,10 @@ export interface MyBidRow {
 // v6.17.0 的 /api/market/sea-signs、cpu-board、trainees 三个端点已退役：成交情报迁进 /market/intel
 // （rumors + deals），可激活名单换成 /api/market/activatable，海捞资格查询走 /api/market/sea-lookup。
 // 更早的 FreeAgentRow/FreeAgentsResponse 已随 /api/market/free-agents 下线，别再复活。
-
-/** 转会传闻（GET /api/market/rumors，公开）：系统按窗口派生，真真假假，不下发真假字段 */
-export interface RumorItem {
-  id: string;
-  text: string;
-  playerId: number;
-  playerName: string;
-  clubName: string;
-}
-
-export interface RumorsResponse {
-  rumors: RumorItem[];
-}
-
-/** 已达成交易行（GET /api/market/deals，公开，completed_at 倒序 ≤50 条） */
-export interface MarketDealsRow {
-  id: number;
-  type: string;
-  playerId: number;
-  playerName: string;
-  /** 原东家；null = 无归属（真自由身） */
-  fromClubName: string | null;
-  /** 去向；null = 球员去自由身 */
-  toClubName: string | null;
-  /** 金额语义随 type：transfer/activation/forced_auction=成交价；free_agent/rc_change/match=新违约金；termination=0（前端显示 —） */
-  fee: number | null;
-  /** 附加销毁费（如匹配差额回收） */
-  extraFee: number | null;
-  season: number | null;
-  windowSeq: number | null;
-  completedAt: string | null;
-}
-
-export interface MarketDealsResponse {
-  deals: MarketDealsRow[];
-}
-
-/**
- * 转会广告板行（GET /api/market/transfer-board，公开，v6.31.0）：只收 `players.transfer_listed = 1`。
- * 与 /api/players 列表的差别：这里**下发公开标价数值 listPrice**（v6.33.0；最低报价转全系统私密），并带着重度与挂出时间。
- */
-export interface TransferBoardRow {
-  id: number;
-  uid: string;
-  fcId: number | null;
-  name: string;
-  positions: string[];
-  age: number | null;
-  ca: number;
-  pa: number;
-  clubId: number | null;
-  // v6.64.2：端点已排除无东家的球员（club_id 为空不进名单），但类型必须照真实载荷写——
-  // 旧类型声明的 string 让「队名 null」骗过了 typecheck，直接在 TeamLogo 里抛错白屏。
-  clubName: string | null;
-  /** 挂牌队的 R2 队徽 key（v6.32.0；无徽 null → TeamLogo 回落队名哈希色块） */
-  logoKey: string | null;
-  listPrice: number | null;
-  /** 现行合同违约金（无合同 → null，显示「—」） */
-  releaseFee: number | null;
-  /** 进入转会名单的时刻（历史存量未回填 → null） */
-  listedAt: string | null;
-  /** 着重度现行最高档：0 普通 / 1 推荐 / 2 置顶（付费流程预留，本版只读） */
-  emphasis: 0 | 1 | 2;
-  /** 置顶到期时刻（仅 emphasis = 2 有） */
-  emphasisUntil: string | null;
-  status: string;
-  notForSale: boolean;
-  transferPriced: boolean;
-}
-
-export interface TransferBoardResponse {
-  players: TransferBoardRow[];
-  /** 转会名单总人数（可能大于 players.length），用于「查看全部 N 人」与截断提示 */
-  total: number;
-}
-
-/** 海捞资格查询行（GET /api/market/sea-lookup，教练：ID 点查或名字 LIKE，≤8 条） */
-export interface SeaLookupRow {
-  id: number;
-  fcId: number | null;
-  name: string;
-  position: string | null;
-  age: number | null;
-  ca: number | null;
-  pa: number | null;
-  clubName: string | null;
-  seaSign: { eligible: boolean; reason: string | null };
-}
-
-export interface SeaLookupResponse {
-  results: SeaLookupRow[];
-}
-
-/** 可激活球员行（GET /api/market/activatable，教练：外队球员 CA 降序 ≤100 条） */
-export interface ActivatablePlayer {
-  id: number;
-  fcId: number | null;
-  name: string;
-  position: string | null;
-  age: number | null;
-  ca: number | null;
-  pa: number | null;
-  status: string;
-  club: { id: number; name: string };
-  contractType: 'formal' | 'trainee';
-  /** 激活费：训练营固定 5m，正式球员按违约金与保护期计；正式合同缺违约金时为 null（不可激活） */
-  activationFee: number | null;
-  activatedThisWindow: boolean;
-  /** 刚签约（服务刻度内）：本窗不能被激活 */
-  justSigned: boolean;
-}
-
-export interface ActivatableResponse {
-  club: { id: number; name: string } | null;
-  players: ActivatablePlayer[];
-}
+// RumorItem / RumorsResponse / MarketDealsRow / MarketDealsResponse / TransferBoardRow /
+// TransferBoardResponse / SeaLookupRow / SeaLookupResponse / ActivatablePlayer / ActivatableResponse
+// 已迁 src/contract/batch6.ts（v6.82.0 第 6 批；deals 行三快照键与容器分页两键按 workerExtra 补抄、
+// TransferBoardRow.ca/pa 按列可空可空化——R-WEB 断点登记见契约型注），本文件只 re-export。
 
 // RcChangeResult / TerminationResult / FreeAgentResult / MatchDecisionResult 已迁
 // src/contract/batch5.ts（v6.82.0 第 5 批；RcChangeResult.freeRcChange 按 workerMissing 删——
@@ -693,46 +543,9 @@ export interface ActivatableResponse {
 // WindowRow / WindowsResponse / OpenWindowResult / CloseWindowResult 已迁 src/contract/batch4.ts
 // （v6.82.0 第 4 批；Open/Close 五处 workerExtra 补抄的处置见契约型注），本文件只 re-export。
 
-/** 强制拍卖人选参考值（v6.51.0：队内非门将 CA 前六只作参考，不再强制） */
-export interface ForcedAuctionReference {
-  playerId: number;
-  /** EA 球员 ID（球员页 URL 上的号）；可能为空 */
-  fcId: number | null;
-  playerName: string;
-  clubId: number | null;
-  clubName: string | null;
-  position: string | null;
-  ca: number | null;
-  /** 门将（前六参考口径不含门将） */
-  isGk: boolean;
-  /** 队内非门将 CA 排名（并列取并列最优名次）；门将 / 缺 CA 为 null */
-  caRank: number | null;
-  /** 队内非门将第六名的 CA（前六参考线）；有 CA 的非门将不足六人为 null */
-  topSixLine: number | null;
-  /** 是否落在队内非门将 CA 前六（参考值，不强制）；门将 / 缺 CA 为 null */
-  inTopSix: boolean | null;
-  /** 队内有 CA 的非门将人数 */
-  nonGkWithCa: number;
-}
-
-export interface ForcedAuctionBlocker {
-  status: number;
-  message: string;
-  errCode?: string;
-}
-
-/** GET /api/admin/forced-auctions/preview：人选参考 + 现在挂出会被拒的原因 */
-export interface ForcedAuctionPreview {
-  reference: ForcedAuctionReference;
-  blockers: ForcedAuctionBlocker[];
-}
-
-export interface ForcedAuctionResult {
-  ok: boolean;
-  listingId: number;
-  askPrice: number;
-  reference: ForcedAuctionReference;
-}
+// 强拍状态机四件套（ForcedAuctionReference / ForcedAuctionBlocker / ForcedAuctionPreview /
+// ForcedAuctionResult）已迁 src/contract/batch6.ts（v6.82.0 第 6 批；ok 收窄 true、命名 D 处置
+// ForcedAuctionPreview ← worker 内部名 ForcedAuctionInspection，见契约型注），本文件只 re-export。
 
 // ---- v0.7.0 DTO（附录 A〔6〕：财政/赛季/赛果/成长/通知/监管）----
 

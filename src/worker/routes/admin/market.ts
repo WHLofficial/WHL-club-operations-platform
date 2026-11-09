@@ -10,6 +10,10 @@ import { adminVoidBid, adminForceSettle, adminForceVoid, adminForceSign, adminRe
 // 契约类型锚点（v6.82.0 第 4 批）：窗口三端点与看板的 c.json 泛型以 src/contract/batch4.ts 为真源
 // （开/关窗回执由 window-machine 的 return 标注互锁，这里泛型是第二道编译期锁）。
 import type { CloseWindowResult, OpenWindowResult, WindowOverviewRow, WindowsResponse } from '../../../contract/batch4.ts';
+// 契约类型锚点（v6.82.0 第 6 批）：强拍三端点（preview / create / cancel）的 c.json 泛型以
+// src/contract/batch6.ts 为真源（写侧编译期锁；preview 的 inspectForcedAuction 返回 worker 内部名
+// ForcedAuctionInspection，与契约 ForcedAuctionPreview 结构全同、可赋值）。
+import type { ForcedAuctionCancelResult, ForcedAuctionPreview, ForcedAuctionResult } from '../../../contract/batch6.ts';
 import { listWindows, openWindow, closeWindow } from '../../window-machine.ts';
 import { loadWindowOverview } from '../../squad-audit.ts';
 import { createForcedAuction, cancelForcedAuction, inspectForcedAuction } from '../../bypass.ts';
@@ -155,7 +159,7 @@ app.post('/windows/close', async (c) => {
 // GET /api/admin/forced-auctions/preview?playerId=N —— 人选参考（队内非门将 CA 排名/前六线）+ 闸门预检
 app.get('/forced-auctions/preview', async (c) => {
   await requireAdmin(c.env, c.req.raw);
-  return c.json(await inspectForcedAuction(c.env, c.req.query('playerId')));
+  return c.json<ForcedAuctionPreview>(await inspectForcedAuction(c.env, c.req.query('playerId')));
 });
 
 // POST /api/admin/forced-auctions —— 建强制拍卖（挂牌价可指定、默认 1m；人选不限；整单税 50%）
@@ -163,14 +167,16 @@ app.post('/forced-auctions', async (c) => {
   const user = await requireAdmin(c.env, c.req.raw);
   const body = (await readJson(c)) as { playerId?: unknown; askPrice?: unknown } | null;
   const result = await createForcedAuction(c.env, user.id, body?.playerId, body?.askPrice);
-  return c.json(result, 201);
+  // 契约锚点（v6.82.0 第 6 批）：bypass.ts createForcedAuction 的 return 标注已指向契约类型
+  return c.json<ForcedAuctionResult>(result, 201);
 });
 
 // POST /api/admin/forced-auctions/:id/cancel —— 取消（未成交前）
 app.post('/forced-auctions/:id/cancel', async (c) => {
   const user = await requireAdmin(c.env, c.req.raw);
   const result = await cancelForcedAuction(c.env, user.id, c.req.param('id'));
-  return c.json(result);
+  // 契约锚点（v6.82.0 第 6 批）：取消回执补具名（甄别 notes P2，web MarketPage.tsx 内联不动）
+  return c.json<ForcedAuctionCancelResult>(result);
 });
 
 export default app;
