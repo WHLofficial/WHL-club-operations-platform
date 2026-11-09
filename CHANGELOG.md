@@ -4,6 +4,32 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.82.0] · 跨端契约层：`src/contract/` 单一真源（2026-11-09，本地完成未 push）
+
+**Added**
+
+- **`src/contract/` 契约类型唯一真源六批落地**（纯类型层：只许 `import type`、来源限本目录与 `src/core/**`、禁 `export const`；`batch1–6.ts` 按批分文件）：workbench+demand **24 型** / players+growth+squad+tier **54** / shop+venue+naming+finance+ledger+notification 等 **64** / club+season+match+event+admin **70** / sea+offer+negotiation+transfer **31** / market **26**，六批漂移处置 **1/14/6/24/9/12** 条（甄别清单 fieldDiff 逐条挂 A–G 处置：跟载荷现实 / workerExtra 补抄 / 删谎言键 / 命名归属 / 双用注明 / viewmodel 留守 / 跨批单源）；§6.8 漏审补录 9 型随批入库（ContractDto / ComplianceReport / TournamentRow / BindTournamentResult / ResultQueueRow / ConfirmedResultRow / ResultsQueue / ConfirmResultResult / M0Report）；P2 随批补具名（WorkbenchProofResponse、NamingRenewResult、ShopOrderMutationResult、offers 五回执、CancelOwnResult 等）。提交 `0de3f09`（批1）→ `f08fa52`（批2）→ `8851458`（批3）→ `3fefaf0`（批4）→ `d91963a`（批5）→ `4e50318`（批6）。
+- **新增 web 测试两文件**：`web/src/pages/club/DeskTab.rc-change.test.tsx`（TC-B5-01，2 例：续约提价/降价 toast 逐字，锁死分支删除不改可见输出）、`web/src/pages/market/TransferBoard.null.test.tsx`（TC-B6-01，3 例：看板 ca=NULL 行渲染「—」不崩）。
+
+**Changed**
+
+- **`web/src/lib/api.ts` 手抄清零改转发**：3181 行 → **729 行**，甄别当日 262 个手抄 `export type/interface` 收敛为 **3 名原地保留**（`MeUser` / `AuthMode` 基础设施、`ManualLedgerKind` viewmodel；`GROWTH_EVENT_LABEL` 本就是 `export const` 不在 262 计数内）+ 六块按批 `export type {…} from '…src/contract/batchN.ts'` 转发；web 侧按名 import 全仓零改动。
+- **worker 侧契约锚点**：六批白名单内响应装配点以契约类型标注（return 标注 / `c.json<T>` 泛型）；跨批让渡 18 型未重复建形（禁双真源）；`AGENTS.md` 契约行入库（随批 1，现 :63）。
+- **类型层修正（`c.json` 载荷逐字节不变）**：B5 处置 1 删 `DeskTab.tsx` 续约提交「本次免费」两死分支——worker 响应从不携带 `freeRcChange`、分支恒假从未渲染，全六批唯一 web 运行时改动、零可见变化（TC-B5-01 锁）；`TransferBoardRow.ca/pa` 改 `number|null` + `MarketAdBoardPage`「—」防线；B2 R-WEB 防线两处（`growth-ocr.ts` conceded 改 `number|null`、`GrowthEntryPage.tsx` 索引 `?? ''`）；`OfferDetailResponse.offer` 拆 `Omit<OfferListItem,'counterpart'>`（详情装配从不下发 counterpart，web 全仓零读取）；五个 `ok` 收窄字面 `true`；`OfferEventRow.actor.name` 放宽 `string|null`；`PlaystyleDetailRow.source` 放宽 core 五值。
+- **评审修复（`77d8060`；7 条 = 3 medium / 4 low，修 5、登记不改 2）**：batch2 的 sea 字段改引 batch5 具名单源 + `players.ts` 装配点补锚；`TransferPanelOffer` 改 `extends Omit<OfferListItem,'counterpart'>` + `desk.ts` status/turn 改引 `OfferStatus`（消灭六值联合三份无互锁副本）；`venue-ops.ts` 的 `VenueQuoteContractLock` 补消费点（原 `type X = A extends B ? true : never` 无消费点永不红，评审实证）；batch5/batch6 两处注释与现实订正。
+
+**Verification**
+
+- typecheck 三份清（各批施工自跑：B3 记三份全清、B5/B6 记三份自跑全绿、B1 以 tsc 探针实证；B2/B4 批内无逐字留痕）；vitest **207 文件 / 3202 例全绿**（脚本统一跑；v6.81.0 基线 205/3197，净 +2 文件 +5 例 = 上述两个新测试文件 2+3 例）；build / e2e / 生产回读无本轮执行记录（计划 Out，零运行时变化）。**push：未 push**（本地领先 `origin/main` 8 枚，本版占 7 枚，工作区分支 `feat/squad-numbers`；七枚提交全仓 56 文件 +5387/−3630）。
+
+**登记不改（后续增量）**
+
+- `bidCount` 必填谎言键：worker `listingDetailOf` 路径从不下发（只有 feed 有），web 类型级消费压着（`PlayerTransferPanel.test.tsx:47` 夹具字面量、`MarketListingOverlay.tsx:192` 形参），两文件均白名单外且夹具授权未随批下发——真删除随夹具授权一次做完（评审 #6）。
+- worker 侧锚点缺口总账（negotiations.ts 五型 / routes/registration.ts 七型 / worker/growth-tier.ts / routes/admin/sea-sealed.ts / routes/players.ts seaSign/seaComps 投影 / worker/results.ts 命名）——建议下一增量统一「锚点收口批」（评审 #7）。
+- 测试计划 §3 源码锁 TC-LOCK-01…08（`tests/contract-source-lock.test.ts`）与 §7 变异 MV-01…10 **未落地**（本收口实测全仓 grep `TC-LOCK` 零命中）；B2 两处 R-WEB 防线的行为锁未补。
+- 测试计划 §6.5#11（`MyClubOverview.home` 改可选）/ #14（leagueTier 改 snake）与「workerMissing 不改行为 + 既有测试零改动」硬线冲突，按 ask 处置保留原状（`batch4.ts:32-35` 注释留痕），留裁决。
+- `ResultQueueRow.windowSeq` 潜伏显示缺陷（worker 队列行不发、`SeasonsPage.tsx:445` 读它渲染「窗undefined」）——真修随行为增量另立。
+
 ## [v6.81.0] · FC 金槽抑制 FC 银槽（2026-11-08，本地完成未部署）
 
 **Fixed**

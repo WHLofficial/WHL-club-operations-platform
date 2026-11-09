@@ -124,6 +124,32 @@
 
 ---
 
+## v6.82.0 · 跨端契约层：`src/contract/` 单一真源（2026-11-09，本地完成未 push）
+
+**状态**：六批施工 + 评审修复完毕，**本地未 push**（本地领先 `origin/main` 8 枚，本版占 7 枚：`0de3f09` 批1 → `f08fa52` 批2 → `8851458` 批3 → `3fefaf0` 批4 → `d91963a` 批5 → `4e50318` 批6 → `77d8060` 评审修复；工作区分支 `feat/squad-numbers`，七枚共 56 文件 +5387/−3630）。判级 **patch**（纯类型层迁移：worker 各端点 `c.json` 载荷逐字节不变、零迁移、零生产写；唯一 web 运行时改动 = B5 删「本次免费」死分支，恒假分支从未渲染、零可见变化）。
+
+**背景与裁决**：架构走查（2026-11-07）候选 #3——`web/src/lib/api.ts` 手抄 262 型与 269 处 `c.json(...)` 内联构造零机制关联，全仓最大 churn 热点。2026-11-09 定路线 A（共享类型真源，worker handler 返回值标注 + api.ts 改转发，运行时零变化）+ grilling 七问，用户追加「几批全弄清楚一锅端」⇒ 全量一锅端六批（原「首批避开 market 域」的排期注意被一锅端覆盖）；路线 C（Hono RPC）归远期——A 的契约类型就是将来 C 的 `c.json<T>` 标注，A 是 C 的严格前置子集。甄别清单 `scratch/contract-audit-batch1..6.json` 六份（已 gitignore，结论全誊录进测试计划 §6 处置表）。测试计划 `docs/test-plans/v6.82.0-contract-layer.md`（qa-test-planner 口径）。
+
+**交付**：
+- `src/contract/` 六批契约真源（`batch1–6.ts`，纯类型层：只许 `import type`、来源限本目录与 `src/core/**`、禁 `export const`）：workbench+demand **24 型** / players+growth+squad+tier **54** / shop+venue+naming+finance+ledger+notification 等 **64** / club+season+match+event+admin **70** / sea+offer+negotiation+transfer **31** / market **26**，漂移处置 **1/14/6/24/9/12** 条；跨批单源按归属表（MatchEntry* → B2、MarketRound 四件套 → B3、TransferBoard* / ForcedAuction* / MatchPhase → B6 等），让渡 18 型未重复建形；§6.8 漏审补录 9 型随批入库（grep 实证落 batch2/3/4）；P2 随批补具名（WorkbenchProofResponse、NamingRenewResult、ShopOrderMutationResult、offers 五回执、CancelOwnResult 等）。
+- `web/src/lib/api.ts` 手抄清零：3181 行 → **729 行**，262 手抄 → **3 名原地保留**（MeUser / AuthMode / ManualLedgerKind）+ 六块按批 re-export，web 按名 import 零改动。
+- worker 锚点：六批白名单内装配点 return 标注 / `c.json<T>` 泛型（含批 3 缺口中落批 4 白名单的四处：admin/shop、admin/brands、admin/finance、admin/weather 与 clubs.ts 全家）；`AGENTS.md` 契约行入库（随批 1）。
+- 处置表逐条落地：A 类跟载荷现实（TransferBoardRow ca/pa、MatchEntry 七字段可空、OfferDetailResponse 拆 Omit、OfferEventRow.actor.name 放宽、PlaystyleDetailRow.source 放宽 core 五值等）、B 类 workerExtra 补抄、C 类删谎言（BrandQuote.quotaLeft、SeasonRow.ageCap、RcChangeResult.freeRcChange + DeskTab 死分支）、D 类命名归属、E 类 WageForecast 双用注明、五个 `ok` 收窄字面 `true`；R-WEB 防线三处（TransferBoard null「—」、growth-ocr conceded `number|null`、GrowthEntryPage `?? ''`）。
+- 测试：新增 `DeskTab.rc-change.test.tsx`（TC-B5-01，2 例）+ `TransferBoard.null.test.tsx`（TC-B6-01，3 例）；既有测试文件改动仅两处文本锁搬位（`tests/mobile-baseline.test.ts` / `tests/growth-nongrowable.test.ts` 各 +3/−1，断言目标随真源从 api.ts 搬进 batch2.ts，锁的字段语义不变）。
+
+**验收**：typecheck 三份清（各批施工自跑：B3 记三份全清、B5/B6 记三份自跑全绿、B1 以 tsc 探针实证；B2/B4 无逐字留痕）；vitest **207 文件 / 3202 例全绿**（脚本统一跑；v6.81.0 基线 205/3197，净 +2 文件 +5 例 = 两新测试文件 2+3 例，逐文件数过）；评审 7 条（3 medium / 4 low）修 5 登记 2（`77d8060`：sea 单源接线 + players.ts 补锚、TransferPanelOffer extends 消六值联合三份副本、VenueQuoteContractLock 补消费点——原写法无消费点永不红经评审实证、两处注释订正）；build / e2e / 生产回读无本轮执行记录（计划 Out，零运行时变化）。
+
+**登记不改（评审 #6/#7 + 各批 registered/deferred，后续增量）**：
+- `bidCount` 必填谎言键（`listingDetailOf` 从不下发、只有 feed 有；web 类型级消费压着、夹具授权未随批下发）——真删除随夹具授权一次做完（评审 #6）。
+- worker 锚点缺口总账（negotiations.ts 五型 / routes/registration.ts 七型 / worker/growth-tier.ts TierDiffRow / routes/admin/sea-sealed.ts / routes/players.ts seaSign/seaComps 投影 / worker/results.ts 命名）——建议下一增量统一「锚点收口批」（评审 #7）。
+- 测试计划 §3 源码锁 TC-LOCK-01…08（`tests/contract-source-lock.test.ts`）与 §7 变异 MV-01…10 **未落地**（本收口实测全仓 grep `TC-LOCK` 零命中）；B2 两处 R-WEB 防线的行为锁未补。补锁时 TC-LOCK-01 需按现实调整：`src/contract/` 未建 `index.ts` barrel，api.ts 按批直连六块 re-export。
+- 测试计划 §6.5#11（`MyClubOverview.home` 改可选 + R-WEB 改 ClubDetail.tsx）/ #14（leagueTier 改 snake）与「workerMissing 不改行为 + 既有测试零改动」硬线冲突，按 ask 处置保留原状（`batch4.ts:32-35` / `:51-56` 注释留痕），留裁决。
+- `ResultQueueRow.windowSeq` 潜伏显示缺陷（worker 队列行不发、`SeasonsPage.tsx:445` 读它渲染「窗undefined」）——真修随行为增量另立。
+
+对照明细见 `docs/test-plans/v6.82.0-contract-layer.md` §10「实际交付对照」。
+
+---
+
 ## v6.81.0 · FC 金槽抑制 FC 银槽（2026-11-08，已上线 Version bfc57b4c）
 
 **裁决**：全库巡检发现 2 处 FC 存档原生「金银共存且银未抑制」（Rodrygo 105 银搓射+金搓射、Diogo Costa 136 银远抛+金远抛）——抑制公式只处理「金明细抑制 FC 银槽」，FC 金槽不抑制任何银源。修复走两步：**a 案存量清理**（2 条 `json_set` 置 0 重复 FC 银槽，台账银 6→5 / 5→4，审计 `playstyle_fc_silver_clear`）+ **b 案公式治本**（用户拍板「1 吧，开干」）。
