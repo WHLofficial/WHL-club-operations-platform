@@ -13,6 +13,10 @@ import {
   type ListingStatus,
 } from '../src/core/listing-state.ts';
 import { createTestDb, sqlGet } from './d1.ts';
+import type { Env } from '../src/worker/env.ts';
+import type { MarketContext } from '../src/worker/market-context.ts';
+import { adminVoidBid } from '../src/worker/market-intervene.ts';
+import { delistUnbid, voidExpiredActivation, type ListingCore } from '../src/worker/market-settle.ts';
 
 const ALL_STATUSES: readonly ListingStatus[] = ['listed', 'bidding', 'matched_pending', 'pending_review', 'delisted'];
 
@@ -66,7 +70,7 @@ const SET_COLUMNS: Record<ListingCloseCause, readonly string[]> = {
 interface ListingSeed {
   seller_club_id: number | null;
   ask_price: number;
-  type: string;
+  type: string | null;
   listed_at: string;
   listed_day: string;
   last_bid_at: string | null;
@@ -197,6 +201,23 @@ function paramsFor(cause: ListingCloseCause): ListingCloseParams<ListingCloseCau
   }
 }
 
+// 批内下标锁：入口函数把 advanceStatement 的结果放回自己 db.batch 的原位置，
+// 这里按提交顺序记录每条语句的 sqlText——语句一旦挪位（比如把 listings 挪到批尾），
+// 依赖「同批已改 delisted」的 EXISTS 前提就不成立，下标断言会立即翻红。
+function traceBatch(db: D1Database): { db: D1Database; sql: string[] } {
+  const sql: string[] = [];
+  const wrapped = {
+    prepare(input: string) {
+      return db.prepare(input);
+    },
+    async batch(statements: D1PreparedStatement[]) {
+      for (const stmt of statements) sql.push((stmt as unknown as { sqlText?: string }).sqlText ?? '');
+      return db.batch(statements);
+    },
+  };
+  return { db: wrapped as unknown as D1Database, sql };
+}
+
 // SET 子句按顶层逗号切分（避开 strftime(...) 里的逗号），取等号左侧列名。
 function setColumns(sql: string): string[] {
   const body = sql.slice(sql.indexOf(' SET ') + ' SET '.length, sql.indexOf(' WHERE '));
@@ -282,6 +303,125 @@ describe('listing-ops 守卫矩阵（真实迁移）', () => {
     }
   });
 
+  it('TC-MX-04 forced_cancel 类型守卫：type 非 forced 时 listed/bidding 均 no-op', async () => {
+    const { sqlite, db } = createTestDb();
+    const cells: { type: string | null; from: ListingStatus }[] = [
+      { type: 'normal', from: 'listed' },
+      { type: 'normal', from: 'bidding' },
+      { type: null, from: 'listed' },
+      { type: null, from: 'bidding' },
+    ];
+    let id = 1300;
+    for (const cell of cells) {
+      const listingId = id++;
+      const before = seedListing(sqlite, listingId, cell.from, { type: cell.type });
+      const label = `${cell.type ?? 'NULL'} from ${cell.from}`;
+      expect(await advance(db, listingId, 'forced_cancel', {}), label).toBe(0);
+      expect(readRow(sqlite, listingId), `${label} 必须整行不动`).toEqual(before);
+    }
+    // 正向对照：同一格换成 type='forced' 确实可收口，证明上面四格失败只因类型守卫。
+    seedListing(sqlite, id, 'listed', { type: 'forced' });
+    expect(await advance(db, id, 'forced_cancel', {})).toBe(1);
+    expect(readRow(sqlite, id).status).toBe('delisted');
+    expect(readRow(sqlite, id).deadline_note).toBe('管理组取消强制拍卖');
+  });
+
+  it('TC-MX-08 admin_reset 活跃出价守卫：有 active bid 时 no-op，仅 superseded/无 bid 可重置', async () => {
+    const { sqlite, db } = createTestDb();
+    // 有活跃出价：重置会让出价/冻结与挂牌状态脱钩，必须拦下
+    const withActive = seedListing(sqlite, 1320, 'bidding');
+    sqlite.exec(
+      `INSERT INTO bids (id, listing_id, club_id, amount, created_at, status)
+       VALUES (7001, 1320, 2, 12, '2026-01-03T00:00:00.000Z', 'active')`,
+    );
+    expect(await advance(db, 1320, 'admin_reset', {})).toBe(0);
+    expect(readRow(sqlite, 1320)).toEqual(withActive);
+
+    // 只有 superseded 历史出价：不阻断重置
+    seedListing(sqlite, 1321, 'bidding');
+    sqlite.exec(
+      `INSERT INTO bids (id, listing_id, club_id, amount, created_at, status)
+       VALUES (7002, 1321, 2, 12, '2026-01-03T00:00:00.000Z', 'superseded')`,
+    );
+    expect(await advance(db, 1321, 'admin_reset', {})).toBe(1);
+    const reset = readRow(sqlite, 1321);
+    expect(reset.status).toBe('listed');
+    expect(reset.last_bid_at).toBeNull();
+    expect(reset.deadline_note).toBe('SEED-NOTE');
+
+    // 无出价：正常重置
+    seedListing(sqlite, 1322, 'bidding');
+    expect(await advance(db, 1322, 'admin_reset', {})).toBe(1);
+    expect(readRow(sqlite, 1322).status).toBe('listed');
+  });
+
+  it('TC-MX-09 first_bid 双时间窗守卫：任一窗过期即 no-op，仅两窗 NULL 放行', async () => {
+    const { sqlite, db } = createTestDb();
+    sqlite.exec(`INSERT INTO clubs (id, name) VALUES (5, 'TC-MX-09 激活方')`); // activated_by 外键
+    const deadlineAt = '2030-01-01T00:00:00.000Z';
+    const expired = '2000-01-01T00:00:00.000Z';
+    const future = '2030-01-02T00:00:00.000Z';
+    const cells: { overrides: SeedOverrides; changes: number; label: string }[] = [
+      { overrides: { deadline_at: expired, activation_deadline: null }, changes: 0, label: 'deadline_at 过期' },
+      {
+        overrides: { deadline_at: null, activation_deadline: expired, activated_by: 5 },
+        changes: 0,
+        label: 'activation_deadline 过期',
+      },
+      { overrides: { deadline_at: null, activation_deadline: null }, changes: 1, label: '两窗 NULL' },
+      {
+        overrides: { deadline_at: future, activation_deadline: expired, activated_by: 5 },
+        changes: 0,
+        label: 'deadline_at 未来 + activation_deadline 过期',
+      },
+    ];
+    let id = 1330;
+    for (const cell of cells) {
+      const listingId = id++;
+      const before = seedListing(sqlite, listingId, 'listed', cell.overrides);
+      expect(await advance(db, listingId, 'first_bid', { deadlineAt }), cell.label).toBe(cell.changes);
+      const after = readRow(sqlite, listingId);
+      if (cell.changes === 0) {
+        expect(after, `${cell.label} 必须整行不动`).toEqual(before);
+      } else {
+        expect(after.status).toBe('bidding');
+        expect(after.deadline_at).toBe(deadlineAt);
+        expect(after.activation_deadline).toBeNull();
+      }
+    }
+  });
+
+  it('TC-MX-06 不存在的挂牌：12 个 cause 一律 changes=0 且不抛', async () => {
+    const { db } = createTestDb();
+    for (const cause of LISTING_CLOSE_CAUSES) {
+      await expect(advance(db, 999999, cause, paramsFor(cause)), cause).resolves.toBe(0);
+    }
+  });
+
+  it('TC-MX-07 幂等重跑：同一行连跑两次，仅 first_bid 第二次仍变更（重写截止）', async () => {
+    const { sqlite, db } = createTestDb();
+    let id = 1400;
+    for (const cause of LISTING_CLOSE_CAUSES) {
+      const listingId = id++;
+      const overrides: SeedOverrides = cause === 'first_bid' ? { deadline_at: null, activation_deadline: null } : {};
+      if (cause === 'forced_cancel') overrides.type = 'forced';
+      seedListing(sqlite, listingId, LEGAL_FROM[cause][0], overrides);
+
+      expect(await advance(db, listingId, cause, paramsFor(cause)), `${cause} 第一次`).toBe(1);
+      const second =
+        cause === 'first_bid'
+          ? await advance(db, listingId, 'first_bid', { deadlineAt: '2031-01-01T00:00:00.000Z' })
+          : await advance(db, listingId, cause, paramsFor(cause));
+      if (cause === 'first_bid') {
+        // 重写式：第二次仍在合法起点内，按第二次入参重写截止时刻
+        expect(second, cause).toBe(1);
+        expect(readRow(sqlite, listingId).deadline_at).toBe('2031-01-01T00:00:00.000Z');
+      } else {
+        expect(second, cause).toBe(0);
+      }
+    }
+  });
+
   it('advanceStatement 形态：单条 prepared statement 可独立执行并回 changes', async () => {
     const { sqlite, db } = createTestDb();
     seedListing(sqlite, 900, 'matched_pending');
@@ -290,6 +430,97 @@ describe('listing-ops 守卫矩阵（真实迁移）', () => {
     const result = await stmt.run();
     expect(result.meta.changes).toBe(1);
     expect(readRow(sqlite, 900).status).toBe('delisted');
+  });
+});
+
+describe('TC-ORD-04 三条 EXISTS 承重链（真实入口，批内下标锁）', () => {
+  it('delistUnbid：listings 语句固定在批首，球员还原/解冻/下架费都以 delisted 为前提', async () => {
+    const { sqlite, db } = createTestDb();
+    // 先落挂牌：fund_holds 的 BEFORE INSERT 闸会校验挂牌状态与两窗（0005/0059/0087）
+    seedListing(sqlite, 2001, 'listed', { type: 'normal', ask_price: 10, deadline_at: null, activation_deadline: null });
+    sqlite.exec(`
+      INSERT INTO clubs (id, name) VALUES (1, 'TC-ORD-04 卖方');
+      INSERT INTO players (id, uid, name, club_id, status) VALUES (2001, 'uid2001', '无人出价', 1, 'listed');
+      INSERT INTO contracts (id, player_id, club_id, contract_type, is_active) VALUES (2001, 2001, 1, 'formal', 1);
+      INSERT INTO ledger_accounts (club_id, balance, updated_at)
+      VALUES (1, 100, '2026-01-01T00:00:00.000Z'), (2, 100, '2026-01-01T00:00:00.000Z');
+      INSERT INTO fund_holds (id, club_id, amount, status, ref_type, ref_id, created_at)
+      VALUES (5001, 2, 10, 'held', 'listing', 2001, '2026-01-01T00:00:00.000Z');
+    `);
+    const trace = traceBatch(db);
+    const env = { DB: trace.db } as unknown as Env;
+    const ctx = { delistFeeRate: 0.1 } as unknown as MarketContext;
+    const listing: ListingCore = {
+      id: 2001,
+      player_id: 2001,
+      seller_club_id: 1,
+      type: 'normal',
+      ask_price: 10,
+      season: 2,
+      window_seq: 3,
+    };
+
+    expect(await delistUnbid(env, listing, ctx, null, 'cron_tick')).toBe('delisted');
+    // 下标 0 = listings 收口；一旦挪到批尾，球员还原/解冻/账本/审计的 EXISTS 前提不再同批成立
+    expect(trace.sql[0]).toContain("UPDATE listings SET status = 'delisted'");
+    expect(trace.sql[1]).toContain('UPDATE players');
+    expect(trace.sql[1]).toContain("EXISTS (SELECT 1 FROM listings WHERE id = ? AND status = 'delisted')");
+    expect(readRow(sqlite, 2001).status).toBe('delisted');
+    expect(sqlGet<{ status: string }>(sqlite, 'SELECT status FROM players WHERE id = 2001')?.status).toBe('normal');
+    expect(sqlGet<{ status: string }>(sqlite, 'SELECT status FROM fund_holds WHERE id = 5001')?.status).toBe('released');
+    expect(sqlGet<{ balance: number }>(sqlite, 'SELECT balance FROM ledger_accounts WHERE club_id = 1')?.balance).toBe(99);
+    expect(
+      sqlGet<{ amount: number }>(sqlite, "SELECT amount FROM ledger_entries WHERE kind = 'delist_fee' AND ref_id = 2001")
+        ?.amount,
+    ).toBe(-1);
+  });
+
+  it('voidExpiredActivation：listings 语句在批首，球员还原为合同类型态', async () => {
+    const { sqlite, db } = createTestDb();
+    sqlite.exec(`
+      INSERT INTO clubs (id, name) VALUES (3, 'TC-ORD-04 原属'), (4, 'TC-ORD-04 激活方');
+      INSERT INTO players (id, uid, name, club_id, status) VALUES (2101, 'uid2101', '激活失效', 3, 'listed');
+      INSERT INTO contracts (id, player_id, club_id, contract_type, is_active) VALUES (2101, 2101, 3, 'trainee', 1);
+    `);
+    seedListing(sqlite, 2101, 'listed', {
+      type: 'activation',
+      activation_deadline: '2000-01-01T00:00:00.000Z',
+      activated_by: 4,
+    });
+    const trace = traceBatch(db);
+
+    expect(await voidExpiredActivation(trace.db, 2101, 2101, null, 'cron_tick')).toBe(true);
+    expect(trace.sql[0]).toContain("UPDATE listings SET status = 'delisted'");
+    expect(trace.sql[1]).toContain('UPDATE players');
+    expect(trace.sql[1]).toContain("EXISTS (SELECT 1 FROM listings WHERE id = ? AND status = 'delisted')");
+    const row = readRow(sqlite, 2101);
+    expect(row.status).toBe('delisted');
+    expect(row.activation_deadline).toBeNull();
+    expect(sqlGet<{ status: string }>(sqlite, 'SELECT status FROM players WHERE id = 2101')?.status).toBe('trainee');
+  });
+
+  it('adminVoidBid：listings 语句固定在批下标 2，撤空后挂牌回 listed 且出价/冻结同步撤销', async () => {
+    const { sqlite, db } = createTestDb();
+    seedListing(sqlite, 2201, 'bidding', { deadline_at: null, activation_deadline: null });
+    sqlite.exec(`
+      INSERT INTO ledger_accounts (club_id, balance, updated_at) VALUES (2, 100, '2026-01-03T00:00:00.000Z');
+      INSERT INTO bids (id, listing_id, club_id, amount, created_at, status)
+      VALUES (7101, 2201, 2, 25, '2026-01-03T00:00:00.000Z', 'active');
+      INSERT INTO fund_holds (id, club_id, amount, status, ref_type, ref_id, created_at)
+      VALUES (5101, 2, 26, 'held', 'listing', 2201, '2026-01-03T00:00:00.000Z');
+    `);
+    const trace = traceBatch(db);
+    const env = { DB: trace.db } as unknown as Env;
+
+    expect(await adminVoidBid(env, 7101, 7, '撤回测试')).toBe('done');
+    expect(trace.sql[0]).toContain("UPDATE bids SET status = 'withdrawn'");
+    expect(trace.sql[1]).toContain("UPDATE fund_holds SET status = 'released'");
+    expect(trace.sql[2]).toContain("UPDATE listings SET status = 'listed'");
+    const row = readRow(sqlite, 2201);
+    expect(row.status).toBe('listed');
+    expect(row.last_bid_at).toBeNull();
+    expect(sqlGet<{ status: string }>(sqlite, 'SELECT status FROM bids WHERE id = 7101')?.status).toBe('withdrawn');
+    expect(sqlGet<{ status: string }>(sqlite, 'SELECT status FROM fund_holds WHERE id = 5101')?.status).toBe('released');
   });
 });
 
@@ -382,6 +613,38 @@ describe('note 文案与附带列（逐字锁）', () => {
     expect(matched.deadline_note).toBeNull();
     expect(matched.match_deadline).toBe(matchDeadline);
     expect(matched.deadline_at).toBeNull();
+  });
+
+  it('TC-COL-02 first_bid 附带列：deadline_at 写入/置 NULL、activation_deadline 必清空', async () => {
+    const { sqlite, db } = createTestDb();
+    sqlite.exec(`INSERT INTO clubs (id, name) VALUES (5, 'TC-COL-02 激活方')`); // activated_by 外键
+    const stamp = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+    const future = '2030-01-01T00:00:00.000Z';
+
+    // (a) 双窗 NULL + 未来截止：写 deadline_at，并清掉 activation_deadline
+    seedListing(sqlite, 1500, 'listed', { deadline_at: null, activation_deadline: null });
+    expect(await advance(db, 1500, 'first_bid', { deadlineAt: future })).toBe(1);
+    let row = readRow(sqlite, 1500);
+    expect(row.deadline_at).toBe(future);
+    expect(row.activation_deadline).toBeNull();
+    expect(row.last_bid_at).toMatch(stamp);
+    expect(row.last_bid_at).not.toBe(BASE_SEED.last_bid_at);
+
+    // (b) 双窗 NULL + 截止 NULL：照旧落 NULL
+    seedListing(sqlite, 1501, 'listed', { deadline_at: null, activation_deadline: null });
+    expect(await advance(db, 1501, 'first_bid', { deadlineAt: null })).toBe(1);
+    expect(readRow(sqlite, 1501).deadline_at).toBeNull();
+
+    // (c) 双窗都未来 + 新截止：覆盖为新串，activation_deadline 清空
+    seedListing(sqlite, 1502, 'listed', {
+      deadline_at: '2030-02-01T00:00:00.000Z',
+      activation_deadline: '2031-02-01T00:00:00.000Z',
+      activated_by: 5,
+    });
+    expect(await advance(db, 1502, 'first_bid', { deadlineAt: future })).toBe(1);
+    row = readRow(sqlite, 1502);
+    expect(row.deadline_at).toBe(future);
+    expect(row.activation_deadline).toBeNull();
   });
 
   it('SET 列集逐 cause 固化：附带列只按语义卡动，只读列绝不入 SET', () => {
