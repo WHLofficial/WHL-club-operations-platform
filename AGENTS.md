@@ -61,6 +61,7 @@ npm run dev:web            # 只改前端时用（Vite，/api 代理到 8791）
 - 前端数据层统一用 TanStack Query（`web/src/lib/queries.ts` 用户端、`adminQueries.ts` 管理端），写后精确 invalidate，不引 useMutation。
 - **球队页 URL 的 id 一律是平台库 `clubs.id`**（`/clubs/:id`），不得用比赛系统 `tour_team_id`；跨库映射（`AUTH_DB.team.club_id → tour_team_id`）只在服务端内部做。此规则长期有效，后续新增的球队相关路由同样照此。
 - **跨端契约类型唯一真源在 `src/contract/`（纯类型层，按批/域分文件）**：`web/src/lib/api.ts` 只 re-export、不得手抄已迁移类型；worker 侧响应装配点以契约类型为锚标注（装配函数 return 标注或 `c.json` 泛型）；契约类型跟随 worker `c.json` 载荷现实，改载荷先改契约再两侧接线。此规则长期有效。
+- **listings 状态转移一律走 `src/worker/listing-ops.ts` 的 `advance`/`advanceStatement`，不许直写 `UPDATE listings SET status`。**
 
 ## 文档纪律
 
