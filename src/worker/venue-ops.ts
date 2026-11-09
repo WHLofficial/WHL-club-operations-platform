@@ -293,6 +293,11 @@ export function activityQuote(
 // 必须逐字段覆盖契约 VenueFigureBlock——公式侧改数名/删数而契约未跟时此行红。本文件是纯写侧
 // 引擎（无 HTTP 装配点），用类型级断言把 core 公式输出与契约形状钉在一起。
 export type VenueQuoteContractLock = VenueQuote extends VenueFigureBlock ? true : never;
+// 锁的消费点（v6.82.0 评审修）：类型级断言没有消费点时永不报错（评审实证），此常量把求值
+// 钉在编译期——VenueQuote 缺字段/改数名而契约未跟时，`true` 不能赋给 never，这里先红。
+// 导出是刻意的：tsconfig.worker noUnusedLocals 会把未读的模块级常量判 TS6133（评审 fixHint
+// 的「未导出常量」写法实测不编译）；全仓无 import * 消费者，导出仅为让锁存活，运行时零影响。
+export const venueQuoteContractLock: VenueQuoteContractLock = true;
 
 /** 单档位的结算流水（收入 + 草皮损坏 + 运营成本，三条），未知活动类型返回空。
  *  satMult 由 windowActivityStatements 按「同类活动在本窗的序位」算出后传入（不是 slot_no 序位）。

@@ -227,9 +227,9 @@ export interface MarketDealsResponse {
  *  FieldDiff #6/#7（typeMismatch，A 处置）：ca / pa 为 `number | null` —— SQL 直读 p.ca/p.pa 无
  *  COALESCE（routes/market.ts:544/:609-610），列可空（0001_init.sql:12-13），api 手抄的非空 number
  *  是谎言（同文件 :1453 注释刚记过 clubName 同类白屏坑，v6.64.2）。
- *  ⚠️ R-WEB 断点（本批登记，未实施）：web 消费点 MarketAdBoardPage.tsx:54/:58/:163 的
- *  attrClass(row.ca/row.pa) 形参是 number，契约可空化后四处调用 typecheck 红——补 `?? '—'` 或
- *  null 分支防线的文件不在第 6 批白名单，防线与 TC-B6-01 夹具测试登记 deferred。 */
+ *  R-WEB 断点（订正：本批登记的 deferred 已兑现）：防线与 TC-B6-01 已随本批实施
+ *  （MarketAdBoardPage attrNum + TransferBoard.null.test.tsx）——web 消费点 attrClass(row.ca/row.pa)
+ *  改 attrNum(v: number | null)（MarketAdBoardPage.tsx:51，:57/:58/:160/:161 消费），null 出「—」。 */
 export interface TransferBoardRow {
   id: number;
   uid: string;

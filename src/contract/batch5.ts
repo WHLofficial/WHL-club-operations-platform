@@ -238,7 +238,8 @@ export interface CancelOwnResult {
 
 // ---------------------------------------------------------------------------
 // 匹配决定（v6.14.0）：POST /api/market/listings/:id/match-decision
-// worker 装配：activations.ts MatchResult :185-190（本文件在白名单外，锚点待落登记）
+// worker 装配：锚点已由第 6 批兑现（activations.ts:202 `Promise<MatchDecisionResult>`，
+// worker 内部名 MatchResult 退役——activations.ts:187 注释自证）
 // ---------------------------------------------------------------------------
 
 /** 被激活方的匹配决定回执。naming：worker 内部名 MatchResult，契约名 = web 名 MatchDecisionResult。

@@ -35,6 +35,10 @@ import type {
   PlayerTransfersResponse,
   PlayersLibraryResponse,
 } from '../../contract/batch2.ts';
+// 海捞情报装配锚（v6.82.0 评审修，兑现 batch5.ts 文件头「锚点待落登记」的 Sea* 欠账）：
+// seaComps 装配体以契约 SeaComps 为变量标注（编译期锁）；seaSign 内联字面经下方
+// c.json<PlayerDetail> 泛型传导（PlayerDetail.seaSign = 契约 SeaSignEligibility）锁住。
+import type { SeaComps } from '../../contract/batch5.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -1326,21 +1330,9 @@ app.get('/players/:id', async (c) => {
   const seaWin = await getOpenWindow(c.env.DB);
   const verdict: SeaSignVerdict = (await seaVerdicts(c.env.DB, [p], seaWin)).get(p.id)!;
   const compsSkip = verdict.stage !== 'ok';
-  const seaComps: {
-    scope: 'same_tier' | 'global' | 'none';
-    rows: {
-      playerId: number;
-      playerName: string;
-      playerCa: number | null;
-      fromClubName: string | null;
-      toClubName: string | null;
-      newReleaseFee: number | null;
-      signFee: number | null;
-      season: number | null;
-      windowSeq: number | null;
-      completedAt: string | null;
-    }[];
-  } = { scope: 'none', rows: [] };
+  // 契约 SeaComps 锚点（v6.82.0 评审修）：装配体变量直接以契约类型标注——toComp 映射或 scope
+  // 联合漂移时这里先红（batch5.ts「锚点待落登记」的 Sea* 欠账在本装配点兑现）。
+  const seaComps: SeaComps = { scope: 'none', rows: [] };
   if (!compsSkip) {
     // 读量注：transfers 只收用户交易单据（旁路/竞价成交/激活三处写入），全表几百到几千行，
     // 无 (type,status) 索引直接扫不构成读放大——零迁移是本增量的既定约束
@@ -1504,7 +1496,8 @@ app.get('/players/:id', async (c) => {
             demandThisWindow: contractState.demandThisWindow,
             transferRequest: contractState.transferRequest,
           },
-    // 海捞情报（v6.17.0）：可签/不可签 + 原因（与 createFreeAgent 守卫链同源）；seaComps 见上方注释
+    // 海捞情报（v6.17.0）：可签/不可签 + 原因（与 createFreeAgent 守卫链同源）；seaComps 见上方注释。
+    // seaSign 契约锚 = c.json<PlayerDetail> 泛型（契约 SeaSignEligibility，batch2.ts 已改引用单源）
     seaSign: { eligible: verdict.ok, reason: verdict.ok ? null : verdict.reason },
     seaComps,
   });

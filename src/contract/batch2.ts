@@ -20,6 +20,9 @@
 //   · PendingContractsResponse 已在第 1 批契约（batch1.ts）单源，本批只转发不重复定义。
 
 import type { ContractAppliedNotice, ContractPendingView, PlayerDemandState } from './batch1.ts';
+// Sea* 域单源（v6.82.0 评审修）：PlayerDetail.seaSign / seaComps 内联承载退役，改引用 batch5 具名
+// 契约——B5 落地时欠的接线在本批补上（契约目录内 import type 互引，纯类型层口径不变）。
+import type { SeaComps, SeaSignEligibility } from './batch5.ts';
 import type { PlayerMarker, SquadIssueRule } from '../core/squad-rules.ts';
 import type { GrowthTierConditionMeta, TierConditionDetail } from '../core/growth-tier.ts';
 import type { PlaystyleSource } from '../core/playstyle-rules.ts';
@@ -181,27 +184,12 @@ export interface PlayerDetail {
    *  投影装配点 players.ts:1488-1496（第 1 批登记的锚点缺口，本批补 c.json 泛型锚）。 */
   demandState?: PlayerDemandState | null;
   /** 海捞资格（v6.17.0）：与后端 createFreeAgent 守卫链同源，左栏海捞按钮的可用性与原因都吃它。
-   *  Sea* 域类型归 B5 批契约（甄别 notes 跨批依赖）；B5 落地前形状以本型内联承载（与 api 手抄
-   *  SeaSignEligibility 逐字段一致），B5 契约落地后应改引用 sea 域契约单源。 */
-  seaSign: { eligible: boolean; reason: string | null };
-  /** 海捞成交参照（v6.17.0）：违约金输入框下方的定价锚。同上归 B5，落地前内联承载
-   *  （与 api 手抄 SeaComps/SeaCompRow 逐字段一致）。 */
-  seaComps: {
-    /** same_tier=同档成交（CA±5）；global=同档空时回落全局最近；none=没有参照 */
-    scope: 'same_tier' | 'global' | 'none';
-    rows: {
-      playerId: number;
-      playerName: string;
-      playerCa: number | null;
-      fromClubName: string | null;
-      toClubName: string | null;
-      newReleaseFee: number | null;
-      signFee: number | null;
-      season: number | null;
-      windowSeq: number | null;
-      completedAt: string | null;
-    }[];
-  };
+   *  Sea* 域类型归 B5 批契约；v6.82.0 评审修：内联承载已改引用 batch5.ts 的 SeaSignEligibility
+   *  具名单源（原「B5 落地后应改引用」的接线欠账兑现，编译期互锁生效）。 */
+  seaSign: SeaSignEligibility;
+  /** 海捞成交参照（v6.17.0）：违约金输入框下方的定价锚。同上改引用 batch5.ts 的 SeaComps
+   *  （行形状 = SeaCompRow）。 */
+  seaComps: SeaComps;
 }
 
 // ---------------------------------------------------------------------------

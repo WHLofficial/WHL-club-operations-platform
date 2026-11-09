@@ -12,6 +12,9 @@
 // extends batch6.ts 的 MarketListingBase——字段单源随基型传导（拆基型联动，测试计划 §6.7 #12）。
 
 import type { MarketListingBase } from './batch6.ts';
+// offers 域单源（v6.82.0 评审修）：TransferPanelOffer 改继承 batch5 的 OfferListItem，
+// status 六值命名联合随基型传导 OfferStatus，不再复制字面联合。
+import type { OfferListItem } from './batch5.ts';
 
 // ---------------------------------------------------------------------------
 // 转会台（desk / workbench 前台）
@@ -26,25 +29,13 @@ export interface DeskSummary {
   total: number;
 }
 
-/** 转会浮层 offers 成员行：worker desk.ts offerOf 装配，与 offers 域 OfferListItem（api 手抄）
- *  逐字段一致。status/turn 值域甄别核实归 offers 批（B5）复核——B5 契约落地后本型应改引用
- *  offers 域契约单源，不在此复制命名联合（契约内部辅助型，不出 barrel）。 */
-interface TransferPanelOffer {
-  id: number;
-  player: { id: number; fcId: number | null; name: string; position: string | null; ca: number | null; pa: number | null; listPrice: number | null };
-  counterpart: { id: number; name: string };
-  role: 'buyer' | 'seller';
-  amount: number;
-  initAmount: number;
-  round: number;
-  note: string | null;
-  status: 'pending' | 'intent' | 'accepted' | 'rejected' | 'withdrawn' | 'expired';
-  turn: 'buyer' | 'seller';
-  myTurn: boolean;
-  listingId: number | null;
-  createdAt: string;
-  updatedAt: string;
-}
+/** 转会浮层 offers 成员行：worker desk.ts offerOf 装配（desk.ts:149-166），与 offers 域
+ *  OfferListItem 逐字段同形。v6.82.0 评审修：字面成员改继承 batch5.ts 的 OfferListItem 单源
+ *  （status 六值命名联合随基型传导 OfferStatus，三份副本收敛为一份；契约内部辅助型，不出 barrel）。
+ *  ⚠️ 评审 fixHint 原提议 extends Omit<OfferListItem,'counterpart'>，未采纳：web 消费点
+ *  PlayerTransferPanel.tsx:230/:237 读 o.counterpart，desk.ts:153 装配也实发该键，Omit 会把
+ *  真实下发的字段从契约里删掉（详情端点 routes/offers.ts 的 Omit 口径不适用于本端点）。 */
+interface TransferPanelOffer extends OfferListItem {}
 
 /** 转会浮层 listing 成员：worker 走 listingDetailOf 装配（market.ts，与 GET /market/listings/:id
  *  详情同口径）+ marketBidPaused。契约内部辅助型（不出 barrel）：

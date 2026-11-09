@@ -19,6 +19,11 @@ import type {
   DeskSummary as DeskSummaryDto,
   TransferPanelResponse as TransferPanelResponseDto,
 } from '../../contract/batch1.ts';
+// status 六值具名单源（v6.82.0 评审修）：行类型不再复制字面联合，改引用契约 OfferStatus
+// （契约内 OfferListItem.status 同名同源）；turn 二值取 core/offer-rules.ts 的 OfferTurn
+// （契约 batch5.ts:335 注释点名的同值单源）。
+import type { OfferStatus } from '../../contract/batch5.ts';
+import type { OfferTurn } from '../../core/offer-rules.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -93,10 +98,11 @@ interface OfferPanelRow {
   init_amount: number;
   round: number;
   note: string | null;
-  /** offers.status 全部写值 = 六值（甄别核实，归 offers 批复核）；contract-demands 侧同理 */
-  status: 'pending' | 'intent' | 'accepted' | 'rejected' | 'withdrawn' | 'expired';
-  /** 0037_offers.sql 列注释：buyer/seller 二值 */
-  turn: 'buyer' | 'seller';
+  /** offers.status 六值（甄别核实与契约联合无失配）；v6.82.0 评审修改引用契约具名 OfferStatus
+   *  ——将来新增 status 值只改 batch5 一处，这里 typecheck 即红。contract-demands 侧同理 */
+  status: OfferStatus;
+  /** 0037_offers.sql 列注释：buyer/seller 二值——core OfferTurn 同名单源 */
+  turn: OfferTurn;
   listing_id: number | null;
   created_at: string;
   updated_at: string;
