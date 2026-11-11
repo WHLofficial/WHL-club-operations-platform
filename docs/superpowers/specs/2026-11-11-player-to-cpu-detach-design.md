@@ -50,17 +50,31 @@
 
 ### 3.1 保留阵容和合同
 
-转换只改队名和 `is_cpu`，不动：
+转换改队名、`is_cpu`、`transfer_banned`，并清空账本余额与消费券；除此之外不动：
 
 - `players` 归属；
 - `contracts`；
-- 余额、账本、球场、设施、联赛级别、`status`、`transfer_banned`。
+- 球场、设施、联赛级别、`status`。
+
+`transfer_banned` 在转换时自动清零：CPU 队不接受转会动作，保留冻结没有意义；将来被玩家接管时也不应继承旧冻结。
 
 后果必须明确写进向导：
 
 - CPU 队球员按 `src/worker/player-flow-state.ts:185-186` 的既有口径按「无归属」处理，可被海捞；
 - CPU 队不产生转会费；
-- 现有合同不构成海捞的归属障碍。
+- 现有合同不构成海捞的归属障碍；
+- 该队现金余额和消费券会被全部回收，重新接管时不会退回。
+
+### 3.1.1 账本与消费券回收
+
+口径：**余额归零、钱和券退出流通，不转入任何账户**。
+
+- 现金：`ledgerMovement` 写一条 `delta = -balance` 的负数流水，`kind='cpu_detach_reclaim'`，`ref_type='club_cpu_detach'`，`ref_id=club_id`；
+- 消费券：`voucherMovement` 写一条 `delta = -vouchers` 的负数流水，`kind='cpu_detach_reclaim'`，同一 `ref_type/ref_id`；
+- 账户与流水必须同批：复用现有 `ledgerMovement` / `voucherMovement`，不直接 `UPDATE` 余额；
+- 余额为 0 时不写流水，只写转换审计中的 `balanceBefore/vouchersBefore`；
+- 转换审计记录回收前金额，便于对账；重新接管不恢复这笔钱和券；
+- 不新增 D1 迁移：`ledger_entries.kind` / `voucher_entries.kind` 是 TEXT，新增 kind 只改 TypeScript 联合类型与展示标签。
 
 ### 3.2 默认阻止在途
 
@@ -70,6 +84,9 @@
 - 该队作为卖方的未终态挂牌；
 - 该队作为买方或卖方的 `offers.status IN ('pending','intent')`；
 - 该队相关的 `transfers.status='pending_review'`；
+- 该队相关的历史 `transfers.status='signing'`（旧流程残留、语义仍在途）；
+- 该队 `contract_demands.status IN ('pending','countered','accepted')`；
+- 该队仍有 `fund_holds.status='held'`；
 - 关联的 open `review_tasks`；
 - 建议名撞 `clubs.name` UNIQUE；
 - 建议名超过 40 字。
@@ -81,9 +98,11 @@
 转换完成后必须同时满足：
 
 - `clubs.is_cpu=1`；
+- `clubs.transfer_banned=0`；
 - `clubs.name` 以半角 `(CPU)` 结尾；
 - 赛事系统 `team.name` 以半角 `(CPU)` 结尾（tour 查无此队时允许缺失并给出警告）；
 - 该队绑定账号数为 0；
+- `ledger_accounts.balance=0` 且 `ledger_accounts.vouchers=0`；
 - 没有 active 谈判/挂牌/报价/待审过户；
 - 合同与球员归属未被改动。
 
@@ -135,12 +154,12 @@ P0 安全守卫
 五步向导
   ① 预检（只读）
   ② 赛事侧改名（tour）
-  ③ 本仓改名 + is_cpu=1
+  ③ 本仓改名 + is_cpu=1 + transfer_banned=0 + 回收余额/消费券
   ④ 批量解绑全部账号
   ⑤ 复核（再跑一次预检）
 ```
 
-`is_cpu=1` 在第③步落库；在第④步之前，原教练已经被 P0 守卫挡住。即使解绑部分失败，也不会留下可操作的教练入口。
+`is_cpu=1`、`transfer_banned=0` 与账本/券回收在第③步的同一 D1 batch 落库；在第④步之前，原教练已经被 P0 守卫挡住。即使解绑部分失败，也不会留下可操作的教练入口，也不会留下「CPU 队还带着钱」的状态。
 
 ## 6. 后端设计
 
@@ -271,7 +290,7 @@ export async function fetchCpuDetach(id: number): Promise<CpuDetachState> {
 - 成功写审计 `club_cpu_detach_tour`，`after: { from, to }`；
 - 幂等：tour 名已经是目标名，返回 `renamed:false`。
 
-#### ② 本仓改名 + 置 CPU
+#### ② 本仓改名 + 置 CPU + 回收账本
 
 `POST /api/admin/clubs/:id/to-cpu/rename-local`，权限 `club.clubs.manage`。
 
@@ -281,7 +300,7 @@ export async function fetchCpuDetach(id: number): Promise<CpuDetachState> {
 
 ```sql
 UPDATE clubs
-SET name = ?, is_cpu = 1
+SET name = ?, is_cpu = 1, transfer_banned = 0
 WHERE id = ? AND is_cpu = 0
   AND NOT EXISTS (SELECT 1 FROM negotiation_sessions s WHERE s.club_id = ? AND s.status = 'active')
   AND NOT EXISTS (SELECT 1 FROM listings l WHERE l.seller_club_id = ? AND l.status IN ('active','matched_pending'))
@@ -293,11 +312,13 @@ WHERE id = ? AND is_cpu = 0
   AND NOT EXISTS (SELECT 1 FROM transfers t WHERE (t.from_club_id = ? OR t.to_club_id = ?) AND t.status = 'pending_review')
 ```
 
-（实际 SQL 以各表真实状态值为准，实现时把状态集合收敛到一处常量。）
+（实际 SQL 以各表真实状态值为准，实现时把状态集合收敛到一处常量；`contract_demands`、`signing`、`fund_holds` 同样进阻断。）
 
+- 同一 batch 内追加账本/券回收：负数流水与余额归零成对出现，金额按 batch 前余额计算，不读路由层快照；
+- 余额/券为 0 时不写流水；转换审计记录 `balanceBefore/vouchersBefore`；
 - `changes=0` 时重查预检：若已是 CPU 且名字相同，返回 `changed:false, flipped:false`；否则 409 `blocked`，带 blockers。
 - 撞 `clubs.name` UNIQUE 回 409 `name_taken`。
-- 成功写审计 `club_cpu_detach_local`，`after: { from, to, isCpu: 1 }`。
+- 成功写审计 `club_cpu_detach_local`，`after: { from, to, isCpu: 1, transferBanned: 0, balanceReclaimed, vouchersReclaimed }`。
 - 若 `is_cpu=1` 但名字不匹配（修复场景），允许只改名字，返回 `changed:true, flipped:false`；不能借此绕过阻断项。
 
 #### ③ 批量解绑
@@ -329,6 +350,11 @@ WHERE id = ? AND is_cpu = 0
 
 - 现有：`club.isCpu` 显示「接管向导」；
 - 新增：`!club.isCpu` 显示「转 CPU」，链接 `/admin/clubs/to-cpu?id=${club.id}`。
+
+入口对称：两个方向都提供「列表 + 详情」两类入口，不新增管理端俱乐部详情页。
+
+- CPU→玩家：`ClubsPage` 行内「接管向导」是列表入口；`/admin/clubs/cpu-convert` 无 id 是 CPU 队列表，有 id 是五步向导详情页。现状已具备，不额外改。
+- 玩家→CPU：`ClubsPage` 行内「转 CPU」是列表入口；`/admin/clubs/to-cpu` 无 id 是人类队列表，有 id 是五步向导详情页，与 CPU→玩家同构。
 
 路由加在 `web/src/App.tsx:207` 附近：
 
@@ -376,7 +402,7 @@ WHERE id = ? AND is_cpu = 0
 3. `seed-ops` 已存在会 no-op；
 4. 发码重新绑定。
 
-合同和阵容一直在，不需要数据恢复。
+合同和阵容一直在，不需要数据恢复。按用户 2026-11-11 裁决，接管向导**不加**「资金/券已回收、转会冻结已清零」提示；接管方按正常流程查看当前余额即可。
 
 ## 9. 测试计划
 
@@ -434,6 +460,13 @@ WHERE id = ? AND is_cpu = 0
 5. 首次生产转换由管理端手动执行，需用户单独下令。
 
 无 D1 迁移；代码回滚安全。
+
+### 10.1 首次验收
+
+- 目标：**佛罗伦萨（club 110374）、阿斯顿维拉（club 2）**；两者当前 `status='active'`、`is_cpu=0`、`transfer_banned=0`、AUTH_DB 绑定数 0（2026-11-11 只读核验）。
+- 时机：S9 W2 关窗后执行，不在开窗期做首次转换。
+- 验收只做四件事：tour/本仓改名、解绑（本次为 0 个绑定，验证空集路径）、余额/券归零并写流水、用接管向导回滚一支。
+- 不做开窗期海捞演练；海捞走既有 CPU 规则，已有生产 CPU 队可验证。
 
 ## 11. 后续增强
 
