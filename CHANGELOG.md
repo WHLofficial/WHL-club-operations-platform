@@ -4,7 +4,7 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
-## [v6.84.0] · 玩家队 → CPU 队反向转换（2026-11-12，本地完成，未 push）
+## [v6.84.0] · 玩家队 → CPU 队反向转换（2026-11-12，已上线 Version 87949e3b）
 
 **Added**
 
@@ -24,7 +24,8 @@
 
 - `npm run typecheck` 三份清；`npm test` **213 文件 / 3,273 例**全绿；`npm run build` 4.86s 通过。
 - 新增/补充用例：CPU 队成长写入口 403、管理员兼绑 CPU 队 403、批前余额变动按实际余额回收、未置 CPU 拒绝解绑、复核 `funds=false`、CPU queued 报价不转正、event/shop 阻断。
-- 未 commit / 未 push / 未部署 / 未写生产；首次真实转换（佛罗伦萨 110374、阿斯顿维拉 2）待用户单独下令。
+- push `8a07066..46f1dc7` 触发 CF Workers Builds 自动部署 Version `87949e3b-937a-4d2d-8086-bb68a50640db` @2026-11-12T15:09:11Z（100%）；线上回读 `/api/health` 200、`/api/admin/clubs/2/to-cpu` 匿名 401、管理端懒加载块 `ToCpuPage-EeDUQCcW.js` 200。
+- 首次真实转换（佛罗伦萨 110374、阿斯顿维拉 2）未执行，待用户单独下令。
 
 ## [v6.83.0] · 挂牌收口单入口：`advance`/`advanceStatement` + 转移表（2026-11-09，本地未 push）
 
