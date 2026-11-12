@@ -40,8 +40,8 @@ import { rateLimit } from '../../lib/ratelimit.ts';
 import { assertPublicRate, cachedJson, waitUntilOf } from '../../lib/guard.ts';
 import { ttlForScope } from '../../lib/cache-policy.ts';
 import { writeAudit } from '../../lib/audit.ts';
-import { authBindTeam, AuthApiError } from '../authClient.ts';
-import { getBoundClub } from '../binding.ts';
+import { authBindTeam, authUnbindTeam, AuthApiError } from '../authClient.ts';
+import { getBoundClub, loadClubById, type BoundClub } from '../binding.ts';
 import { loadClubTourTeams, loadTeamLogos } from '../club-logos.ts';
 import { deriveClubTier, deriveClubLeagues, deriveClubTiers } from '../tier.ts';
 import { closedRegularTicks } from '../contract-ticks.ts';
@@ -651,6 +651,19 @@ app.get('/clubs/:id/standing', async (c) => {
   }
 });
 
+// v6.84.0：绑定成功后按刚拿到的 teamId 解析本侧俱乐部（**不吃请求级记忆化**）。
+// requireCoach 在绑定前已经把「该账号未绑定」按请求缓存（binding.ts 的 bindingMemo），
+// 再调 getBoundClub(c.env, user.id, c.req.raw) 只会读到绑定前的旧值——OIDC 模式
+// 「绑定已完成，但俱乐部目录尚未关联」502 的根因就是它。这里直接查 auth 目录。
+async function loadBoundClubAfterBind(env: Env, teamId: number, userId: number): Promise<BoundClub | null> {
+  if (!env.AUTH_DB) return getBoundClub(env, userId); // 未配 AUTH_DB 时 authBindTeam 本就不可用，照旧真查兜底
+  const row = await env.AUTH_DB.prepare('SELECT club_id FROM team WHERE id = ?')
+    .bind(teamId)
+    .first<{ club_id: number | null }>();
+  if (!row?.club_id) return null;
+  return loadClubById(env, row.club_id);
+}
+
 app.post('/clubs/bind', async (c) => {
   const user = await requireCoach(c.env, c.req.raw, 'club.squad.manage');
   // 按 IP 限尝试次数：10 分钟窗口 5 次（正常输入一次就成功，够防爆破）
@@ -666,8 +679,9 @@ app.post('/clubs/bind', async (c) => {
 
   // 烧码在 auth 认证中心单事务原子完成（v1.0.0：中央码表 team_bind_code + team_binding）；
   // 本地 club_bind_code 表休眠（保留防回滚，不再读写）
+  let teamId: number;
   try {
-    await authBindTeam(c.env, { code, accountId: user.id });
+    ({ teamId } = await authBindTeam(c.env, { code, accountId: user.id }));
   } catch (e) {
     if (e instanceof AuthApiError) {
       if (e.code === 'invalid_code') throw new HttpError(400, '认证码无效或已过期');
@@ -677,9 +691,28 @@ app.post('/clubs/bind', async (c) => {
     throw e;
   }
 
-  // 绑定成功后按目录解析本侧俱乐部（目录行在发码时已按 club_id 关联）
-  const club = await getBoundClub(c.env, user.id, c.req.raw);
+  // 绑定成功后按目录解析本侧俱乐部（目录行在发码时已按 club_id 关联；真查，不吃绑定前缓存）
+  const club = await loadBoundClubAfterBind(c.env, teamId, user.id);
   if (!club) throw new HttpError(502, '绑定已完成，但俱乐部目录尚未关联，请联系管理组');
+
+  // v6.84.0 P0：CPU 队不可绑定。auth 那边已经写下了绑定，这里必须回滚掉，
+  // 否则账号会挂着一支托管队（P0 教练守卫会挡住后续操作，但状态本身就是脏的）。
+  if (club.is_cpu === 1) {
+    try {
+      await authUnbindTeam(c.env, user.id);
+    } catch {
+      throw new HttpError(502, '该队已转为 CPU 队，绑定已建立但解绑失败，请联系管理组');
+    }
+    await writeAudit(c.env.DB, {
+      actor: user.id,
+      action: 'club_bind_rejected_cpu',
+      targetType: 'club',
+      targetId: club.id,
+      origin: 'user',
+      after: { userId: user.id },
+    });
+    throw new HttpError(409, '该队已转为 CPU 队，不能绑定', 'cpu_club');
+  }
 
   // 本地审计只记事实（绑定真源在 auth 库）
   await writeAudit(c.env.DB, {

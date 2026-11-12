@@ -6,7 +6,7 @@
 // 来自登录回调存档的 claims，不再查 TOUR_DB user 表（账号真源在 auth 库，收口后新账号在
 // 赛事库无行）。claims 缺失/损坏的旧会话视为未登录，重新走一次 OIDC 登录即恢复。
 import type { Env } from '../worker/env.ts';
-import { getTeamBinding } from '../worker/binding.ts';
+import { getBoundClub, getTeamBinding } from '../worker/binding.ts';
 import { HttpError } from './http.ts';
 import { sha256Hex } from './crypto.ts';
 import { OIDC_SESSION_COOKIE } from './oidc.ts';
@@ -215,6 +215,14 @@ export async function requireUser(env: Env, request: Request): Promise<SessionUs
 // 判定前必须显式清空才等价（管理组不受 locked 影响，与 mapRole 口径一致）。
 // 教练侧端点（perm 给定时）：持有该权限点或任一管理权限点（旧 requireCoach = admin OR coach，
 // 管理组不受限的行为保留）；不给定时任一管理/教练权限点。
+// v6.84.0 P0：CPU 托管队不可由教练侧操作（队伍已交管理组托管，绑定可能还在——批量解绑是
+// 转 CPU 向导的后续步骤，这中间的空窗期靠这里挡）。绑定与俱乐部行都吃请求级记忆化
+// （binding.ts），随后的 getBoundClub 复用同一份，同请求不额外付查询。
+async function assertNotCpuClub(env: Env, request: Request, userId: number): Promise<void> {
+  const club = await getBoundClub(env, userId, request);
+  if (club?.is_cpu === 1) throw new HttpError(403, '该队已转为 CPU 队，请联系管理组');
+}
+
 export async function requireCoach(env: Env, request: Request, perm?: (typeof COACH_PERMS)[number]): Promise<SessionUser> {
   const user = await requireUser(env, request);
   if (isOidc(env)) {
@@ -222,17 +230,30 @@ export async function requireCoach(env: Env, request: Request, perm?: (typeof CO
     // 改以认证中心绑定为准——绑定了球队即教练；权限点保留为旁路，让未绑定的
     // 准教练也能进 /clubs/bind 这类绑前端点。管理点照旧先行。
     const perms = user.locked ? [] : user.permissions;
-    if (ADMIN_PERMS.some((p) => perms.includes(p))) return user;
+    // 管理组照旧不受权限点/绑定限制，但 CPU 托管队对所有教练侧入口一律 403
+    // （管理员兼教练绑到 CPU 队时同样要挡，v6.84.0 复核 finding）。
+    if (ADMIN_PERMS.some((p) => perms.includes(p))) {
+      await assertNotCpuClub(env, request, user.id);
+      return user;
+    }
     // v6.40.2：按请求记忆化——同请求里随后的 getBoundClub 复用这一份，省一趟 AUTH_DB 跨库往返
     const bound = !user.locked && (await getTeamBinding(env, request, user.id)).bound;
     const ok = perm
       ? perms.includes(perm) || bound
       : COACH_PERMS.some((p) => perms.includes(p)) || bound;
     if (!ok) throw new HttpError(403, '没有权限进行此操作');
+    // v6.84.0 P0：靠绑定当教练的账号，绑到 CPU 队一律 403（P0 守卫先于转 CPU 全套上线）。
+    // 持有权限点的准教练未绑定（bound=false）时没有俱乐部行，不查。
+    if (bound) await assertNotCpuClub(env, request, user.id);
     return user;
   }
+  // 兼容模式：管理组不受权限点限制，但绑定到 CPU 队时同样不能走教练侧入口；
+  // 旧模式原本不看绑定，所以先判 bound 再查俱乐部行。
   if (user.role !== 'admin' && user.role !== 'coach') {
     throw new HttpError(403, '没有权限进行此操作');
+  }
+  if (await getTeamBinding(env, request, user.id).then((b) => b.bound)) {
+    await assertNotCpuClub(env, request, user.id);
   }
   return user;
 }

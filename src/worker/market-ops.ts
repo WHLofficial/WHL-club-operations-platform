@@ -298,7 +298,9 @@ export async function buildRoundStatements(env: Env, season: number, windowSeq: 
   // 开新轮：名额未满（active 合同 + queued 接班合并计）的 adopted 品牌才出手
   const [brands, stadiums, activeRows, queuedRows, tierRules] = await Promise.all([
     loadAdoptedBrands(db),
-    db.prepare('SELECT club_id, capacity, fans FROM stadiums').all<{ club_id: number; capacity: number; fans: number }>(),
+    db.prepare(
+      `SELECT s.club_id, s.capacity, s.fans FROM stadiums s JOIN clubs c ON c.id = s.club_id WHERE COALESCE(c.is_cpu, 0) = 0`,
+    ).all<{ club_id: number; capacity: number; fans: number }>(),
     db.prepare(`SELECT brand, COUNT(*) AS n FROM naming_contracts WHERE status = 'active' GROUP BY brand`).all<{ brand: string; n: number }>(),
     db.prepare(`SELECT brand_id, COUNT(*) AS n FROM market_offers WHERE status = 'queued' GROUP BY brand_id`).all<{ brand_id: number; n: number }>(),
     loadTierRules(db),
@@ -432,8 +434,9 @@ export async function activateQueuedStatements(
       .prepare(
         `SELECT o.id, o.club_id, o.package_no, o.amount, o.windows, o.package_json, b.brand, s.name AS stadium_name
          FROM market_offers o JOIN brand_pool b ON b.id = o.brand_id
+         JOIN clubs c ON c.id = o.club_id
          LEFT JOIN stadiums s ON s.club_id = o.club_id
-         WHERE o.status = 'queued'${scope} ORDER BY o.id`,
+         WHERE o.status = 'queued' AND COALESCE(c.is_cpu, 0) = 0${scope} ORDER BY o.id`,
       )
       .bind(...(clubIds ?? []))
       .all<{

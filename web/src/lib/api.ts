@@ -179,6 +179,7 @@ export type {
 // HomeMatch* 已在第 3 批迁出、MatchPhase / MatchDecisionResult 按 §6.0 归属表让渡 B6 / B5，
 // 均不重复转发；另有测试计划 §6.8 漏审补录六型（TournamentRow / BindTournamentResult /
 // ResultQueueRow / ConfirmedResultRow / ResultsQueue / ConfirmResultResult）随本批迁入。
+// v6.84.0 增补玩家队 → CPU 队反向转换五型（CpuDetachState 与三个动作回执），随 CPU 接管向导同批。
 export type {
   AdminClubRow,
   AdminEventDraft,
@@ -214,6 +215,11 @@ export type {
   ConfigResponse,
   ConfigRow,
   CpuConvertState,
+  CpuDetachBlocker,
+  CpuDetachRenameLocalResult,
+  CpuDetachRenameTourResult,
+  CpuDetachState,
+  CpuDetachUnbindResult,
   CpuRenameLocalResult,
   CpuRenameTourResult,
   CpuSeedOpsResult,

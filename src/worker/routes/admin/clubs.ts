@@ -1,10 +1,17 @@
 // 管理端 · 建队与认证码（§3.2；原 admin.ts 建队域，v2.1.0 拆分，行为零变化）
 // 契约类型锚点（v6.82.0 第 4 批）：俱乐部列表 / 球场档案 / CPU 接管向导四回执的 c.json 泛型以
 // src/contract/batch4.ts 为真源——transferBanned 按 workerReality 去可选等处置见契约型注。
+// v6.84.0 反向转换（玩家队 → CPU 队）五步：GET /clubs/:id/to-cpu（预检/复核）、
+// POST /clubs/:id/to-cpu/rename-tour | rename-local | unbind-all，文件尾有独立分区。
 import { Hono } from 'hono';
 import type {
   AdminClubRow,
   CpuConvertState,
+  CpuDetachBlocker,
+  CpuDetachRenameLocalResult,
+  CpuDetachRenameTourResult,
+  CpuDetachState,
+  CpuDetachUnbindResult,
   CpuRenameLocalResult,
   CpuRenameTourResult,
   CpuSeedOpsResult,
@@ -13,16 +20,20 @@ import type {
 import type { Env } from '../../env.ts';
 import { HttpError } from '../../../lib/http.ts';
 import { requireAdmin } from '../../../lib/session.ts';
-import { writeAudit, type AuditOrigin } from '../../../lib/audit.ts';
+import { createAuditStatement, createAuditStatementWithAfterSql, writeAudit, type AuditOrigin } from '../../../lib/audit.ts';
 import { authIssueTeamCode, authRegisterTeam, authUnbindTeam, AuthApiError } from '../../authClient.ts';
 import { pushTeamToTour, pushTeamRename } from '../../tourClient.ts';
 import { getBoundClub } from '../../binding.ts';
 import { getVisibleSeason } from '../../seasons.ts';
+import { ACTIVE_LISTING_STATES_SQL } from '../../player-flow-state.ts';
+import { ledgerReclaimAll } from '../../ledger.ts';
+import { voucherReclaimAll } from '../../voucher.ts';
 import { loadAttendanceModel, loadTierTable, playerInfluenceSum, teamInfluence, diehardTarget, influenceTierCoef, loadInfluenceTierCoefs } from '../../home.ts';
 import { deriveClubTier, tierCache } from '../../tier.ts';
 import { FACILITY_KEYS } from '../../stadium-ops.ts';
 import { hookTierRecompute } from '../../growth-tier.ts';
 import { nationName } from '../../../core/nations.ts';
+import { CPU_SUFFIX_RE, cpuSuffixName } from '../../../core/cpu-name.ts';
 import { nowSql, readJson } from './shared.ts';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -686,6 +697,548 @@ app.post('/bindings/unbind', async (c) => {
     before: { userId },
   });
   return c.json({ ok: true });
+});
+
+// ==================== v6.84.0 玩家队 → CPU 队反向转换（五步向导） ====================
+// 转换 = 改队名 + is_cpu=1 + transfer_banned=0 + 现金/券退出流通；阵容、合同、球场、级别、status 全不动。
+// 步①预检与步⑤复核共用 GET /to-cpu：checks 是复核六项，blockers 是硬阻断、warnings 只提示。
+
+/** 半角 (CPU) 结尾（容忍尾随空格：赛事系统队名可能带空格）——实现已移至 src/core/cpu-name.ts */
+export { cpuSuffixName };
+
+/** 队名问题的统一判定（预检的 suggest.nameError 用；两个改名端点各自抛 400） */
+function detachNameError(name: string, taken: boolean): string | null {
+  if (name.length > 40) return '队名最多 40 个字';
+  if (taken) return '已有俱乐部使用该名字';
+  return null;
+}
+
+interface DetachCheck {
+  key: string;
+  label: string;
+  /** 命中时的说明（n > 0 才调用） */
+  detail: (n: number) => string;
+  /** 唯一计数口径：只返回单行单列 COUNT。预检的计数与写侧 NOT EXISTS 都由它生成，两处永不漂移 */
+  countSql: (clubId: number) => { sql: string; params: unknown[] };
+}
+
+const CPU_DETACH_CHECKS: DetachCheck[] = [
+  {
+    key: 'negotiation',
+    label: '进行中的转会谈判',
+    detail: (n) => `${n} 笔转会谈判仍在进行，先谈完或取消`,
+    countSql: (id) => ({
+      sql: `SELECT COUNT(*) FROM negotiation_sessions WHERE club_id = ? AND status = 'active'`,
+      params: [id],
+    }),
+  },
+  {
+    key: 'listing',
+    label: '未终态的挂牌',
+    detail: (n) => `${n} 条挂牌仍在挂牌/竞价/待审，先撤单或走完流程`,
+    countSql: (id) => ({
+      sql: `SELECT COUNT(*) FROM listings WHERE seller_club_id = ? AND status IN ${ACTIVE_LISTING_STATES_SQL}`,
+      params: [id],
+    }),
+  },
+  {
+    key: 'offer',
+    label: '未决报价',
+    detail: (n) => `${n} 条报价还在等买卖双方处理`,
+    countSql: (id) => ({
+      sql: `SELECT COUNT(*) FROM offers WHERE (buyer_club_id = ? OR seller_club_id = ?) AND status IN ('pending', 'intent')`,
+      params: [id, id],
+    }),
+  },
+  {
+    key: 'transfer',
+    label: '在途过户',
+    detail: (n) => `${n} 笔过户处于待审或签约中`,
+    countSql: (id) => ({
+      sql: `SELECT COUNT(*) FROM transfers WHERE (from_club_id = ? OR to_club_id = ?) AND status IN ('pending_review', 'signing')`,
+      params: [id, id],
+    }),
+  },
+  {
+    key: 'contract_demand',
+    label: '未决合同诉求',
+    detail: (n) => `${n} 条球员合同诉求未终结（待回应/已还价/待签）`,
+    countSql: (id) => ({
+      sql: `SELECT COUNT(*) FROM contract_demands WHERE club_id = ? AND status IN ('pending', 'countered', 'accepted')`,
+      params: [id],
+    }),
+  },
+  {
+    key: 'fund_hold',
+    label: '冻结中的资金',
+    detail: (n) => `${n} 笔资金仍被冻结，先等冻结结算或释放`,
+    countSql: (id) => ({
+      sql: `SELECT COUNT(*) FROM fund_holds WHERE club_id = ? AND status = 'held'`,
+      params: [id],
+    }),
+  },
+  {
+    key: 'review',
+    label: '未处理的审核任务',
+    detail: (n) => `${n} 条与本队相关的审核任务未处理`,
+    countSql: (id) => ({
+      sql: `SELECT COUNT(*) FROM review_tasks rt
+            WHERE rt.status = 'open' AND (
+              (rt.type = 'transfer_confirm' AND EXISTS (
+                SELECT 1 FROM transfers t WHERE t.id = rt.ref_id AND (t.from_club_id = ? OR t.to_club_id = ?)))
+              OR (rt.type = 'activation_report' AND EXISTS (
+                SELECT 1 FROM listings l WHERE l.id = rt.ref_id AND l.seller_club_id = ?))
+            )`,
+      params: [id, id, id],
+    }),
+  },
+  {
+    key: 'naming',
+    label: '生效中的冠名合同',
+    detail: (n) => `${n} 份冠名合同仍生效，先解约或等合同结束`,
+    countSql: (id) => ({
+      sql: `SELECT COUNT(*) FROM naming_contracts WHERE club_id = ? AND status = 'active'`,
+      params: [id],
+    }),
+  },
+  {
+    key: 'venue',
+    label: '当前窗口的档期预订',
+    detail: (n) => `当前开放窗内还有 ${n} 条档期预订，先把档期改回空置`,
+    countSql: (id) => ({
+      sql: `SELECT COUNT(*) FROM venue_bookings b
+            JOIN season_windows w ON w.season = b.season AND w.window_seq = b.window_seq
+            WHERE b.club_id = ? AND w.status = 'open'`,
+      params: [id],
+    }),
+  },
+  {
+    key: 'event',
+    label: '未结算的随机事件',
+    detail: (n) => `${n} 个随机事件仍待结算`,
+    countSql: (id) => ({
+      sql: `SELECT COUNT(*) FROM event_occurrences WHERE club_id = ? AND status = 'pending'`,
+      params: [id],
+    }),
+  },
+  {
+    key: 'shop_order',
+    label: '待审的消费工单',
+    detail: (n) => `${n} 笔消费工单待审，先审完或拒绝退款`,
+    countSql: (id) => ({
+      sql: `SELECT COUNT(*) FROM shop_orders WHERE club_id = ? AND status = 'pending'`,
+      params: [id],
+    }),
+  },
+];
+
+function detachCountQueries(clubId: number): { check: DetachCheck; query: { sql: string; params: unknown[] } }[] {
+  return CPU_DETACH_CHECKS.map((check) => ({ check, query: check.countSql(clubId) }));
+}
+
+/** 一次查询拿全部阻断计数（列名 c0..cN，顺序同 CPU_DETACH_CHECKS） */
+async function readDetachCounts(db: D1Database, clubId: number): Promise<Map<string, number>> {
+  const queries = detachCountQueries(clubId);
+  const sql = `SELECT ${queries.map(({ query }, i) => `(${query.sql}) AS c${i}`).join(', ')}`;
+  const row = await db
+    .prepare(sql)
+    .bind(...queries.flatMap(({ query }) => query.params))
+    .first<Record<string, number>>();
+  return new Map(queries.map(({ check }, i) => [check.key, Number(row?.[`c${i}`] ?? 0)]));
+}
+
+/** rename-local 的 NOT EXISTS 组：与预检计数同源（每项 0 条才算干净） */
+function detachGuard(clubId: number): { sql: string; params: unknown[] } {
+  const queries = detachCountQueries(clubId);
+  return {
+    sql: queries.map(({ query }) => `(${query.sql}) = 0`).join(' AND '),
+    params: queries.flatMap(({ query }) => query.params),
+  };
+}
+
+function blockersFromCounts(counts: Map<string, number>): CpuDetachBlocker[] {
+  const out: CpuDetachBlocker[] = [];
+  for (const check of CPU_DETACH_CHECKS) {
+    const n = counts.get(check.key) ?? 0;
+    if (n > 0) out.push({ key: check.key, label: check.label, detail: check.detail(n) });
+  }
+  return out;
+}
+
+/** 该队全部绑定（AUTH_DB 优先，未配置回落本地休眠表；与 GET /clubs 同口径） */
+async function readDetachBindings(
+  env: Env,
+  clubId: number,
+): Promise<{ userId: number; userName: string | null; boundAt: string }[]> {
+  const rows = env.AUTH_DB
+    ? await env.AUTH_DB.prepare(
+        `SELECT b.account_id AS user_id, a.name AS user_name, b.bound_at
+         FROM team_binding b JOIN team t ON t.id = b.team_id JOIN account a ON a.id = b.account_id
+         WHERE t.club_id = ? ORDER BY b.account_id`,
+      )
+        .bind(clubId)
+        .all<{ user_id: number; user_name: string | null; bound_at: string }>()
+    : await env.DB.prepare(
+        `SELECT user_id, user_name, bound_at FROM club_bindings WHERE club_id = ? ORDER BY user_id`,
+      )
+        .bind(clubId)
+        .all<{ user_id: number; user_name: string | null; bound_at: string }>();
+  return rows.results.map((r) => ({ userId: r.user_id, userName: r.user_name, boundAt: r.bound_at }));
+}
+
+/** 未使用且未过期的绑定码（仅提示：解绑后请在发码入口确认作废） */
+async function readDetachCodes(
+  env: Env,
+  clubId: number,
+): Promise<{ expiresAt: string | null; createdAt: string }[]> {
+  const rows = env.AUTH_DB
+    ? await env.AUTH_DB.prepare(
+        `SELECT bc.expires_at, bc.created_at FROM team_bind_code bc JOIN team t ON t.id = bc.team_id
+         WHERE t.club_id = ? AND bc.used_at IS NULL AND (bc.expires_at IS NULL OR bc.expires_at > ${nowSql()})
+         ORDER BY bc.id DESC`,
+      )
+        .bind(clubId)
+        .all<{ expires_at: string | null; created_at: string }>()
+    : await env.DB.prepare(
+        `SELECT expires_at, created_at FROM club_bind_code
+         WHERE club_id = ? AND used_by IS NULL AND (expires_at IS NULL OR expires_at > ${nowSql()})
+         ORDER BY id DESC`,
+      )
+        .bind(clubId)
+        .all<{ expires_at: string | null; created_at: string }>();
+  return rows.results.map((r) => ({ expiresAt: r.expires_at, createdAt: r.created_at }));
+}
+
+// ① 预检 / ⑤ 复核：同一端点。bindings 全量、contracts/players/balance 只做展示，阻断口径与写侧同源。
+app.get('/clubs/:id/to-cpu', async (c) => {
+  await requireAdmin(c.env, c.req.raw, 'club.clubs.manage');
+  const clubId = Number(c.req.param('id'));
+  if (!Number.isInteger(clubId) || clubId <= 0) throw new HttpError(400, '俱乐部 ID 不对');
+  const club = await c.env.DB.prepare('SELECT id, name, is_cpu, league_tier, status FROM clubs WHERE id = ?')
+    .bind(clubId)
+    .first<{ id: number; name: string; is_cpu: number; league_tier: string | null; status: string }>();
+  if (!club) throw new HttpError(404, '俱乐部不存在');
+
+  const tourTeam = await c.env.TOUR_DB.prepare('SELECT id, name FROM team WHERE id = ?')
+    .bind(clubId)
+    .first<{ id: number; name: string }>();
+  const bindings = await readDetachBindings(c.env, clubId);
+  const warnings: CpuDetachBlocker[] = [];
+  let codes: { expiresAt: string | null; createdAt: string }[] = [];
+  let codesReadable = true;
+  try {
+    codes = await readDetachCodes(c.env, clubId);
+  } catch {
+    // 码表口径变了也不能把预检打成 500：降级成「看不到码」并提示
+    codesReadable = false;
+    warnings.push({
+      key: 'codes_unavailable',
+      label: '暂时读不到绑定码',
+      detail: '无法确认是否还有未使用的绑定码；解绑后请到发码入口人工确认。',
+    });
+  }
+
+  const contractRow = await c.env.DB.prepare(
+    'SELECT COUNT(*) AS total, COALESCE(SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END), 0) AS active FROM contracts WHERE club_id = ?',
+  )
+    .bind(clubId)
+    .first<{ total: number; active: number }>();
+  const playerRow = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM players WHERE club_id = ?')
+    .bind(clubId)
+    .first<{ n: number }>();
+  const funds = await c.env.DB.prepare(
+    'SELECT COALESCE(balance, 0) AS balance, COALESCE(vouchers, 0) AS vouchers FROM ledger_accounts WHERE club_id = ?',
+  )
+    .bind(clubId)
+    .first<{ balance: number; vouchers: number }>();
+  const balance = Number(funds?.balance ?? 0);
+  const vouchers = Number(funds?.vouchers ?? 0);
+
+  const counts = await readDetachCounts(c.env.DB, clubId);
+  const blockers = blockersFromCounts(counts);
+
+  const suggestName = cpuSuffixName(club.name);
+  const taken = await c.env.DB.prepare('SELECT id FROM clubs WHERE name = ? AND id <> ?')
+    .bind(suggestName, clubId)
+    .first<{ id: number }>();
+  const nameError = detachNameError(suggestName, !!taken);
+
+  if (!tourTeam) {
+    warnings.push({
+      key: 'tour_missing',
+      label: '赛事系统还没有该队',
+      detail: '本仓改名不受影响；对手方改名会失败，可稍后在赛事系统补建球队再重试。',
+    });
+  }
+  if (codes.length > 0) {
+    warnings.push({
+      key: 'unused_codes',
+      label: '还有未使用的绑定码',
+      detail: `${codes.length} 个绑定码未使用；转换后请到发码入口确认作废，避免再被绑回该队。`,
+    });
+  }
+  // 招商轮（C3）只提示不阻断：轮次本身不锁定俱乐部资产，但转换后不会有人跟进。
+  // 轮次 settled 后的 queued 同样要提示——它们仍可能被关窗批转成 active 冠名。
+  const market = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM market_offers o JOIN market_rounds r ON r.id = o.round_id
+     WHERE o.club_id = ? AND o.status IN ('pending', 'queued') AND r.status IN ('open', 'settled')`,
+  )
+    .bind(clubId)
+    .first<{ n: number }>();
+  if ((market?.n ?? 0) > 0) {
+    warnings.push({
+      key: 'market_queue',
+      label: '招商轮仍有排队意向',
+      detail: `有 ${market?.n ?? 0} 条招商意向在开放轮次中排队，转成 CPU 后不会有人跟进。`,
+    });
+  }
+
+  const checks = {
+    isCpu: club.is_cpu === 1,
+    tourName: !tourTeam || CPU_SUFFIX_RE.test(tourTeam.name),
+    localName: CPU_SUFFIX_RE.test(club.name),
+    bindings: bindings.length === 0,
+    codes: !codesReadable || codes.length === 0,
+    funds: balance === 0 && vouchers === 0,
+  };
+  // codes 属软性（只提示），ready 只看硬性 checks + 硬阻断；资金必须已清零
+  const ready =
+    checks.isCpu && checks.tourName && checks.localName && checks.bindings && checks.funds && blockers.length === 0;
+
+  return c.json<CpuDetachState>({
+    club: { id: club.id, name: club.name, isCpu: club.is_cpu === 1, leagueTier: club.league_tier, status: club.status },
+    tour: tourTeam ? { id: tourTeam.id, name: tourTeam.name } : null,
+    bindings,
+    unusedCodes: codes,
+    contracts: { active: contractRow?.active ?? 0, total: contractRow?.total ?? 0 },
+    players: playerRow?.n ?? 0,
+    balance,
+    vouchers,
+    suggest: { newName: suggestName, nameError },
+    blockers,
+    warnings,
+    checks,
+    ready,
+  });
+});
+
+// ② 改 tour 侧队名：失败本仓零改动、无审计（可重试）；同名时 renamed=false 也零写入
+app.post('/clubs/:id/to-cpu/rename-tour', async (c) => {
+  const user = await requireAdmin(c.env, c.req.raw, 'club.clubs.manage');
+  const clubId = Number(c.req.param('id'));
+  if (!Number.isInteger(clubId) || clubId <= 0) throw new HttpError(400, '俱乐部 ID 不对');
+  const club = await c.env.DB.prepare('SELECT id FROM clubs WHERE id = ?').bind(clubId).first<{ id: number }>();
+  if (!club) throw new HttpError(404, '俱乐部不存在');
+  const body = (await readJson(c)) as { name?: unknown } | null;
+  const name = typeof body?.name === 'string' ? body.name.trim() : '';
+  if (!name) throw new HttpError(400, '队名不能为空');
+  if (!name.endsWith('(CPU)')) throw new HttpError(400, 'CPU 队名须以半角 (CPU) 结尾');
+  if (name.length > 40) throw new HttpError(400, '队名最多 40 个字');
+  const before = await c.env.TOUR_DB.prepare('SELECT id, name FROM team WHERE id = ?')
+    .bind(clubId)
+    .first<{ id: number; name: string }>();
+  const push = await pushTeamRename(c.env, { id: clubId, name });
+  if (!push.ok) {
+    // 对手方失败：本仓、账本、审计都不动
+    return c.json({ error: 'tour_sync_failed', message: push.message || '对手方改名失败，请稍后重试' }, 502);
+  }
+  const finalName = push.name ?? name;
+  if (push.renamed) {
+    await writeAudit(c.env.DB, {
+      actor: user.id,
+      action: 'club_cpu_detach_tour',
+      targetType: 'club',
+      targetId: clubId,
+      origin: 'user',
+      after: { from: before?.name ?? null, to: finalName },
+    });
+  }
+  return c.json<CpuDetachRenameTourResult>({ ok: true, renamed: push.renamed, name: finalName });
+});
+
+// ③ 本仓改名 + 翻 CPU + 现金/券退出流通（同一 D1 batch，守卫与预检同源）
+app.post('/clubs/:id/to-cpu/rename-local', async (c) => {
+  const user = await requireAdmin(c.env, c.req.raw, 'club.clubs.manage');
+  const clubId = Number(c.req.param('id'));
+  if (!Number.isInteger(clubId) || clubId <= 0) throw new HttpError(400, '俱乐部 ID 不对');
+  const club = await c.env.DB.prepare('SELECT id, name, is_cpu, transfer_banned FROM clubs WHERE id = ?')
+    .bind(clubId)
+    .first<{ id: number; name: string; is_cpu: number; transfer_banned: number | null }>();
+  if (!club) throw new HttpError(404, '俱乐部不存在');
+  const body = (await readJson(c)) as { name?: unknown } | null;
+  const name = typeof body?.name === 'string' ? body.name.trim() : '';
+  if (!name) throw new HttpError(400, '队名不能为空');
+  if (!name.endsWith('(CPU)')) throw new HttpError(400, 'CPU 队名须以半角 (CPU) 结尾');
+  if (name.length > 40) throw new HttpError(400, '队名最多 40 个字');
+
+  // 重放：已是 CPU 且名字一致 → 零写入（预检 ready 后重复点「转换」）
+  if (club.is_cpu === 1 && club.name === name) {
+    return c.json<CpuDetachRenameLocalResult>({ ok: true, changed: false, flipped: false, name: club.name });
+  }
+  const blockers = blockersFromCounts(await readDetachCounts(c.env.DB, clubId));
+  if (blockers.length > 0) {
+    return c.json({ error: 'blocked', message: '还有未了结的事项，先处理完再做转换', blockers }, 409);
+  }
+  // 修复场景：已经是 CPU、只是名字不对（例如后缀拼错）——同样过阻断，但只改名、不再回收
+  const repair = club.is_cpu === 1;
+
+  const guard = detachGuard(clubId);
+  const updateSql = repair
+    ? `UPDATE clubs SET name = ? WHERE id = ? AND is_cpu = 1 AND ${guard.sql}`
+    : `UPDATE clubs SET name = ?, is_cpu = 1, transfer_banned = 0 WHERE id = ? AND is_cpu = 0 AND ${guard.sql}`;
+  // 审计与 UPDATE 同生共死：名字落库且 is_cpu/transfer_banned 已是目标值才留痕
+  const updateGuard = repair
+    ? '(SELECT name FROM clubs WHERE id = ?) = ? AND (SELECT is_cpu FROM clubs WHERE id = ?) = 1'
+    : '(SELECT name FROM clubs WHERE id = ?) = ? AND (SELECT is_cpu FROM clubs WHERE id = ?) = 1 AND (SELECT transfer_banned FROM clubs WHERE id = ?) = 0';
+  const updateGuardParams = repair ? [clubId, name, clubId] : [clubId, name, clubId, clubId];
+
+  const stmts: D1PreparedStatement[] = [
+    c.env.DB.prepare(updateSql).bind(name, clubId, ...guard.params),
+  ];
+  if (!repair) {
+    // 金额由 SQL 读当前余额，不再用 batch 前的快照：并发扣款/加款时也能一次清零，
+    // 且流水金额与审计金额都取实际值。
+    stmts.push(
+      ...ledgerReclaimAll(c.env.DB, {
+        clubId,
+        kind: 'cpu_detach_reclaim',
+        refType: 'club_cpu_detach',
+        refId: clubId,
+        memo: '玩家队转 CPU：现金余额退出流通',
+        guardSql: updateGuard,
+        guardParams: updateGuardParams,
+      }),
+    );
+    stmts.push(
+      ...voucherReclaimAll(c.env.DB, {
+        clubId,
+        kind: 'cpu_detach_reclaim',
+        refType: 'club_cpu_detach',
+        refId: clubId,
+        memo: '玩家队转 CPU：消费券退出流通',
+        guardSql: updateGuard,
+        guardParams: updateGuardParams,
+      }),
+    );
+  }
+  const before = { name: club.name, isCpu: club.is_cpu === 1, transferBanned: club.transfer_banned === 1 };
+  if (repair) {
+    stmts.push(
+      createAuditStatement(c.env.DB)({
+        actor: user.id,
+        action: 'club_cpu_detach_local',
+        targetType: 'club',
+        targetId: clubId,
+        origin: 'user',
+        before,
+        after: { from: club.name, to: name, isCpu: true, transferBanned: false, repair },
+        guardSql: updateGuard,
+        guardParams: updateGuardParams,
+      }),
+    );
+  } else {
+    // 回收金额在 batch 内取实际流水合计；审计守卫同时要求账户已清零，避免 finding 2 的残额/谎报。
+    const auditAfterSql = `json_object(
+      'from', ?, 'to', ?, 'isCpu', json('true'), 'transferBanned', json('false'),
+      'balanceBefore', COALESCE(-(SELECT SUM(amount) FROM ledger_entries WHERE club_id = ? AND kind = 'cpu_detach_reclaim' AND ref_type = 'club_cpu_detach' AND ref_id = ?), 0),
+      'balanceReclaimed', COALESCE(-(SELECT SUM(amount) FROM ledger_entries WHERE club_id = ? AND kind = 'cpu_detach_reclaim' AND ref_type = 'club_cpu_detach' AND ref_id = ?), 0),
+      'vouchersBefore', COALESCE(-(SELECT SUM(amount) FROM voucher_entries WHERE club_id = ? AND kind = 'cpu_detach_reclaim' AND ref_type = 'club_cpu_detach' AND ref_id = ?), 0),
+      'vouchersReclaimed', COALESCE(-(SELECT SUM(amount) FROM voucher_entries WHERE club_id = ? AND kind = 'cpu_detach_reclaim' AND ref_type = 'club_cpu_detach' AND ref_id = ?), 0)
+    )`;
+    const auditGuard = `${updateGuard} AND COALESCE((SELECT balance FROM ledger_accounts WHERE club_id = ?), 0) = 0 AND COALESCE((SELECT vouchers FROM ledger_accounts WHERE club_id = ?), 0) = 0`;
+    stmts.push(
+      createAuditStatementWithAfterSql(
+        c.env.DB,
+        {
+          actor: user.id,
+          action: 'club_cpu_detach_local',
+          targetType: 'club',
+          targetId: clubId,
+          origin: 'user',
+          before,
+          guardSql: auditGuard,
+          guardParams: [...updateGuardParams, clubId, clubId],
+        },
+        auditAfterSql,
+        [club.name, name, clubId, clubId, clubId, clubId, clubId, clubId, clubId, clubId],
+      ),
+    );
+  }
+
+  let flipped = false;
+  try {
+    const results = await c.env.DB.batch(stmts);
+    flipped = (results[0]?.meta.changes ?? 0) > 0;
+  } catch (e) {
+    // 撞名给可判别的 409（整批已回滚，本仓零改动）；别的 SQL 错误照旧冒泡 500
+    if (/UNIQUE/i.test(String((e as Error)?.message ?? ''))) {
+      return c.json({ error: 'name_taken', message: '已有俱乐部使用该名字' }, 409);
+    }
+    throw e;
+  }
+  if (!flipped) {
+    // 并发/状态变了：重查一次，能确认「已是 CPU 且同名」就按幂等返回，否则把当前阻断回给前端
+    const now = await c.env.DB.prepare('SELECT name, is_cpu FROM clubs WHERE id = ?')
+      .bind(clubId)
+      .first<{ name: string; is_cpu: number }>();
+    if (now && now.is_cpu === 1 && now.name === name) {
+      return c.json<CpuDetachRenameLocalResult>({ ok: true, changed: false, flipped: false, name: now.name });
+    }
+    const current = blockersFromCounts(await readDetachCounts(c.env.DB, clubId));
+    return c.json(
+      {
+        error: 'blocked',
+        message: '转换条件已变化，请刷新预检后重试',
+        blockers:
+          current.length > 0
+            ? current
+            : [{ key: 'state_changed', label: '俱乐部状态已变化', detail: '请刷新预检后重试' }],
+      },
+      409,
+    );
+  }
+  return c.json<CpuDetachRenameLocalResult>({ ok: true, changed: true, flipped: !repair, name });
+});
+
+// ④ 解绑全部账号：执行时重查真源，逐个解绑；not_bound 视为已解绑，其他失败收集后继续（不回滚、可重试）
+app.post('/clubs/:id/to-cpu/unbind-all', async (c) => {
+  const user = await requireAdmin(c.env, c.req.raw, 'club.bindings.unbind');
+  const clubId = Number(c.req.param('id'));
+  if (!Number.isInteger(clubId) || clubId <= 0) throw new HttpError(400, '俱乐部 ID 不对');
+  const club = await c.env.DB.prepare('SELECT id, is_cpu FROM clubs WHERE id = ?')
+    .bind(clubId)
+    .first<{ id: number; is_cpu: number }>();
+  if (!club) throw new HttpError(404, '俱乐部不存在');
+  if (club.is_cpu !== 1) throw new HttpError(409, '该队还不是 CPU 队，请先完成第③步');
+  const bindings = await readDetachBindings(c.env, clubId);
+  const unbound: number[] = [];
+  const alreadyUnbound: number[] = [];
+  const failed: CpuDetachUnbindResult['failed'] = [];
+  for (const binding of bindings) {
+    try {
+      await authUnbindTeam(c.env, binding.userId);
+      unbound.push(binding.userId);
+      await writeAudit(c.env.DB, {
+        actor: user.id,
+        action: 'club_cpu_detach_unbind',
+        targetType: 'club',
+        targetId: clubId,
+        origin: 'user',
+        before: { userId: binding.userId },
+      });
+    } catch (e) {
+      if (e instanceof AuthApiError) {
+        if (e.code === 'not_bound') {
+          alreadyUnbound.push(binding.userId); // 另一入口已解绑：不算失败
+          continue;
+        }
+        failed.push({ userId: binding.userId, code: e.code, message: e.message });
+        continue;
+      }
+      throw e;
+    }
+  }
+  return c.json<CpuDetachUnbindResult>({ ok: failed.length === 0, unbound, alreadyUnbound, failed });
 });
 
 export default app;

@@ -321,6 +321,11 @@ function ClubsSection() {
                         接管向导
                       </Link>
                     )}
+                    {!club.isCpu && (
+                      <Link className="btn btn-ghost btn-sm" to={`/admin/clubs/to-cpu?id=${club.id}`}>
+                        转 CPU
+                      </Link>
+                    )}
                     <button className="btn btn-ghost btn-sm" type="button" onClick={() => issueCode(club)}>
                       发认证码
                     </button>

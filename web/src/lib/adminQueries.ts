@@ -1,7 +1,7 @@
 // 管理端共享数据层（v2.1.0 commit 3）：
 // clubs 原来在俱乐部/合同导入/期初余额/手动记账四个 section 各拉一次，共享 key 自动去重；
 // /api/seasons/current 赛季页与球员页成长引擎都要用，同样共享。
-import { api, apiSend, type AdminClubRow, type AdminShopOrdersResponse, type CpuConvertState, type MarketRoundReopenResult, type MarketRoundResponse, type MatchEntryInput, type MatchEntryListResponse, type MatchEntryPanel, type MatchEntrySubmitResult, type SeasonCurrent, type WeatherForecastPreview } from './api.ts';
+import { api, apiSend, type AdminClubRow, type AdminShopOrdersResponse, type CpuConvertState, type CpuDetachState, type MarketRoundReopenResult, type MarketRoundResponse, type MatchEntryInput, type MatchEntryListResponse, type MatchEntryPanel, type MatchEntrySubmitResult, type SeasonCurrent, type WeatherForecastPreview } from './api.ts';
 
 export const ADMIN_CLUBS_KEY = ['admin', 'clubs'] as const;
 export const SEASON_CURRENT_KEY = ['seasons', 'current'] as const;
@@ -84,4 +84,11 @@ export const CPU_CONVERT_KEY = (id: number) => ['admin', 'cpu-convert', id] as c
 
 export async function fetchCpuConvert(id: number): Promise<CpuConvertState> {
   return api<CpuConvertState>(`/api/admin/clubs/${id}/cpu-convert`);
+}
+
+// v6.84.0 玩家队 → CPU 队：预检与复核共用同一份载荷（GET 幂等），三个动作后 invalidate 本 key
+export const CPU_DETACH_KEY = (id: number) => ['admin', 'cpu-detach', id] as const;
+
+export async function fetchCpuDetach(id: number): Promise<CpuDetachState> {
+  return api<CpuDetachState>(`/api/admin/clubs/${id}/to-cpu`);
 }

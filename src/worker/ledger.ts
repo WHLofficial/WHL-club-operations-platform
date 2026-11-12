@@ -26,6 +26,44 @@ function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
 }
 
+/**
+ * 把账户余额整体清零（玩家队转 CPU 的“退出流通”专用）。
+ *
+ * 与 ledgerMovement 的区别：delta 不在路由层按批前快照写死，而是由 SQL 读当前余额。
+ * 流水先落（amount = -balance），再把账户清零，两条语句必须在同一个 D1 batch；
+ * 这样并发扣款/加款时不会出现“按 1500 扣、余额只剩 1400 导致扣款被守卫挡下”的残额，
+ * 也不会写出负余额。balance_after 固定为 0（本批结束时账户必为 0）。
+ */
+export interface ReclaimAllInput {
+  clubId: number;
+  kind: string;
+  refType: string | null;
+  refId: number | null;
+  memo: string;
+  guardSql?: string;
+  guardParams?: unknown[];
+}
+
+export function ledgerReclaimAll(db: D1Database, input: ReclaimAllInput): D1PreparedStatement[] {
+  const guard = input.guardSql ? ` AND (${input.guardSql})` : '';
+  const guardParams = input.guardParams ?? [];
+  return [
+    db
+      .prepare(
+        `INSERT INTO ledger_entries (club_id, kind, amount, balance_after, ref_type, ref_id, memo, created_at)
+         SELECT club_id, ?, -balance, 0, ?, ?, ?, ${nowSql()}
+           FROM ledger_accounts WHERE club_id = ? AND balance > 0${guard}`,
+      )
+      .bind(input.kind, input.refType, input.refId, input.memo, input.clubId, ...guardParams),
+    db
+      .prepare(
+        `UPDATE ledger_accounts SET balance = 0, updated_at = ${nowSql()}
+          WHERE club_id = ? AND balance > 0${guard}`,
+      )
+      .bind(input.clubId, ...guardParams),
+  ];
+}
+
 export function ledgerMovement(db: D1Database, input: MovementInput): D1PreparedStatement[] {
   const guardParts = ['1=1'];
   const guardParams: unknown[] = [];

@@ -169,6 +169,8 @@ app.post('/growth/levelup/:playerId', async (c) => {
   if (!club || club.id !== player.club_id) {
     throw new HttpError(403, '只有球员所属俱乐部的教练能选升级方案');
   }
+  // v6.84.0 P0：转 CPU 后绑定可能还在，教练侧写入口一律挡（与 requireCoach 同一口径）
+  if (club.is_cpu === 1) throw new HttpError(403, '该队已转为 CPU 队，请联系管理组');
   const out = await applyLevelUp(c.env, user.id, playerId, body?.planIndex, body?.picks);
   return c.json<LevelUpResult>(out);
 });
@@ -190,6 +192,8 @@ app.post('/growth/china-playstyles/:playerId', async (c) => {
   if (!club || club.id !== player.club_id) {
     throw new HttpError(403, '只有球员所属俱乐部的教练能发中国计划徽章');
   }
+  // v6.84.0 P0：转 CPU 后绑定可能还在，教练侧写入口一律挡（与 requireCoach 同一口径）
+  if (club.is_cpu === 1) throw new HttpError(403, '该队已转为 CPU 队，请联系管理组');
   const out = await grantChinaPlaystyles(c.env, user.id, playerId, body?.picks);
   return c.json(out);
 });

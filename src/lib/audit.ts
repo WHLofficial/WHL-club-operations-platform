@@ -64,6 +64,35 @@ export function createAuditStatement(db: D1Database) {
   };
 }
 
+/**
+ * 同批审计，after 由 SQL 表达式现场算出（读取本批刚写的账本流水）。
+ * 用于「回收金额必须等于实际余额」这类不能接受路由层快照的场景；afterParams 绑定在
+ * entry 的六个参数之后、guardParams 之前，顺序与 SQL 中 `?` 出现顺序一致。
+ */
+export function createAuditStatementWithAfterSql(
+  db: D1Database,
+  entry: Omit<AuditEntry, 'after'>,
+  afterSql: string,
+  afterParams: unknown[] = [],
+): D1PreparedStatement {
+  const binds = [
+    entry.actor,
+    entry.action,
+    entry.targetType,
+    entry.targetId ?? null,
+    entry.origin,
+    entry.before === undefined ? null : JSON.stringify(entry.before),
+    ...afterParams,
+  ];
+  const guard = entry.guardSql !== undefined ? ` WHERE ${entry.guardSql}` : '';
+  return db
+    .prepare(
+      `INSERT INTO audit_log (actor, action, target_type, target_id, origin, before, after, at)
+       SELECT ?, ?, ?, ?, ?, ?, ${afterSql}, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')${guard}`,
+    )
+    .bind(...binds, ...(entry.guardParams ?? []));
+}
+
 export async function writeAudit(db: D1Database, entry: AuditEntry): Promise<void> {
   await createAuditStatement(db)(entry).run();
 }

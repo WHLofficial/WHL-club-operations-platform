@@ -14,7 +14,8 @@ export type VoucherKind =
   | 'shop_use' // 消费中心工单抵扣
   | 'shop_refund' // 工单被拒退回
   | 'admin_grant' // 管理组发放
-  | 'event_grant'; // 随机事件效果发券（v6.58.0 起走券账，替代直改 stadiums.build_credit）
+  | 'event_grant' // 随机事件效果发券（v6.58.0 起走券账，替代直改 stadiums.build_credit）
+  | 'cpu_detach_reclaim'; // 玩家队转 CPU：券余额退出流通（v6.84.0，delta 为负、账户归零）
 
 export interface VoucherMovementInput {
   clubId: number;
@@ -37,6 +38,37 @@ export interface VoucherMovementInput {
 
 function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
+}
+
+/** 券余额整体清零（与 ledgerReclaimAll 同构）：流水先落、账户后清零，同一 D1 batch。 */
+export interface VoucherReclaimAllInput {
+  clubId: number;
+  kind: VoucherKind;
+  refType: string | null;
+  refId: number | null;
+  memo: string;
+  guardSql?: string;
+  guardParams?: unknown[];
+}
+
+export function voucherReclaimAll(db: D1Database, input: VoucherReclaimAllInput): D1PreparedStatement[] {
+  const guard = input.guardSql ? ` AND (${input.guardSql})` : '';
+  const guardParams = input.guardParams ?? [];
+  return [
+    db
+      .prepare(
+        `INSERT INTO voucher_entries (club_id, kind, amount, balance_after, ref_type, ref_id, memo, created_at)
+         SELECT club_id, ?, ROUND(-vouchers, 2), 0, ?, ?, ?, ${nowSql()}
+           FROM ledger_accounts WHERE club_id = ? AND vouchers > 0${guard}`,
+      )
+      .bind(input.kind, input.refType, input.refId, input.memo, input.clubId, ...guardParams),
+    db
+      .prepare(
+        `UPDATE ledger_accounts SET vouchers = 0, updated_at = ${nowSql()}
+          WHERE club_id = ? AND vouchers > 0${guard}`,
+      )
+      .bind(input.clubId, ...guardParams),
+  ];
 }
 
 export function voucherMovement(db: D1Database, input: VoucherMovementInput): D1PreparedStatement[] {

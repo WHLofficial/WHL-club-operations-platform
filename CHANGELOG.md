@@ -4,6 +4,28 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.84.0] · 玩家队 → CPU 队反向转换（2026-11-12，本地完成，未 push）
+
+**Added**
+
+- **管理端五步向导**：`GET /api/admin/clubs/:id/to-cpu` 预检、`POST /to-cpu/rename-tour` 赛事侧改名、`POST /to-cpu/rename-local` 本仓改名并置 CPU、`POST /to-cpu/unbind-all` 批量解绑、复核复用预检。页面 `web/src/pages/admin/ToCpuPage.tsx`，入口与 `CpuConvertPage` 对称（列表行内 + `/admin/clubs/to-cpu`）。
+- **CPU 队不可操作守卫**：`requireCoach` 在绑定后判 `is_cpu=1` 并 403；OIDC 管理员兼绑 CPU 队也不再绕过；`/clubs/bind` 绑定后直查 AUTH_DB，遇到 CPU 队回滚并 409（同时修现行 OIDC 绑定 502）。
+- **账本与消费券回收**：`ledgerReclaimAll` / `voucherReclaimAll` 在批内读当前余额，写入负数流水并把余额/券归零；转换审计记录 `balanceBefore/balanceReclaimed/vouchersBefore/vouchersReclaimed`。
+- **CPU 不入账**：`home.ts` 关窗批维护费/冠名/档期收入对 CPU 队置 0（`fans_window_start` 仍推进）；`triggerEventBatch` 默认与显式目标集都排除 CPU；`market-ops` 的 queued 报价与冠名不再落到 CPU 队。
+- **12 类阻断**：active 谈判、未终态挂牌、pending/intent 报价、pending_review/signing 过户、待签合同诉求、held 资金、open 审核、pending 随机事件、pending 消费工单、active 冠名、当前 open 窗档期、名字冲突/超长。
+
+**Changed**
+
+- `CpuDetachState` 增加 `vouchers` 与 `checks.funds`；复核六项全过才 `ready`；`unbind-all` 先校验 `is_cpu=1`（否则 409），绑定列表不再 `LIMIT 10`。
+- `cpuSuffixName` 下沉 `src/core/cpu-name.ts`；`to-cpu` 页面显示余额与消费券，修复分支文案按 `flipped` 区分。
+- 设计稿同步 v6.84.0：§3.2/3.3/6.1/6.4/6.5/6.6/9 补 event/shop 阻断、券字段、批内回收与审计口径、六项复核；新增测试计划 `docs/test-plans/v6.84.0-cpu-detach.md`。
+
+**Verification**
+
+- `npm run typecheck` 三份清；`npm test` **213 文件 / 3,273 例**全绿；`npm run build` 4.86s 通过。
+- 新增/补充用例：CPU 队成长写入口 403、管理员兼绑 CPU 队 403、批前余额变动按实际余额回收、未置 CPU 拒绝解绑、复核 `funds=false`、CPU queued 报价不转正、event/shop 阻断。
+- 未 commit / 未 push / 未部署 / 未写生产；首次真实转换（佛罗伦萨 110374、阿斯顿维拉 2）待用户单独下令。
+
 ## [v6.83.0] · 挂牌收口单入口：`advance`/`advanceStatement` + 转移表（2026-11-09，本地未 push）
 
 **Added**

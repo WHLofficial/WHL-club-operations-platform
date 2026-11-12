@@ -14,6 +14,8 @@ export interface BoundClub {
   id: number;
   name: string;
   transfer_banned: number;
+  /** 1 = CPU 托管队（v6.84.0）：教练侧一律拒绝，管理端解绑/接管照常可用 → 这里不过滤 */
+  is_cpu: number;
 }
 
 export interface TeamBinding {
@@ -61,12 +63,37 @@ async function boundClubId(env: Env, userId: number): Promise<number | null> {
   return (await loadTeamBinding(env, userId)).clubId;
 }
 
+export async function loadClubById(env: Env, clubId: number): Promise<BoundClub | null> {
+  // v1.2.0：league_tier 由报名派生（tier.ts），不再随绑定查询返回
+  // v6.84.0：补 is_cpu——requireCoach 的 CPU 守卫要判它
+  return env.DB.prepare('SELECT id, name, transfer_banned, is_cpu FROM clubs WHERE id = ?').bind(clubId).first<BoundClub>();
+}
+
+// v6.84.0：俱乐部行也按请求记忆化（同族手法，键是 clubId——行内容与账号无关）。
+// 同一请求里 requireCoach 的 CPU 守卫与随后的 getBoundClub 查的是同一行，只付一次本库点查。
+const clubMemo = new WeakMap<Request, Map<number, Promise<BoundClub | null>>>();
+
 // request 可选：给了就吃按请求记忆化（同请求里 requireCoach 刚查过的那份），不给照旧真查。
 export async function getBoundClub(env: Env, userId: number, request?: Request): Promise<BoundClub | null> {
-  const clubId = request ? (await getTeamBinding(env, request, userId)).clubId : await boundClubId(env, userId);
+  if (!request) {
+    const clubId = await boundClubId(env, userId);
+    return clubId === null ? null : loadClubById(env, clubId);
+  }
+  const clubId = (await getTeamBinding(env, request, userId)).clubId;
   if (clubId === null) return null;
-  // v1.2.0：league_tier 由报名派生（tier.ts），不再随绑定查询返回
-  return env.DB.prepare('SELECT id, name, transfer_banned FROM clubs WHERE id = ?').bind(clubId).first<BoundClub>();
+  let perClub = clubMemo.get(request);
+  if (!perClub) {
+    perClub = new Map();
+    clubMemo.set(request, perClub);
+  }
+  const hit = perClub.get(clubId);
+  if (hit) return hit;
+  const pending = loadClubById(env, clubId).catch((err: unknown) => {
+    perClub.delete(clubId);
+    throw err;
+  });
+  perClub.set(clubId, pending);
+  return pending;
 }
 
 // v1.3.0：转会禁令守卫——挂单/出价/激活/海捞/续约/解约/匹配/议价报价等新转会动作统一拦在入口

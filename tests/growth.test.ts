@@ -823,6 +823,17 @@ describe('中国计划徽章发放（v3.3.0：中国计划自选 3 个银 PlaySt
     expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM player_playstyles WHERE player_id = 22 AND source = 'china'")?.n).toBe(3);
     expect(sqlGet<{ badges_silver: number }>(fx.sqlite, 'SELECT badges_silver FROM players WHERE id = 22')?.badges_silver).toBe(3);
   });
+
+  it('CPU 队教练的写入口一律 403（转 CPU 后绑定可能还在）', async () => {
+    const fx = freshEnv();
+    seedPlatform(fx);
+    fx.sqlite.exec('UPDATE clubs SET is_cpu = 1 WHERE id = 2');
+
+    const res = await post('/api/growth/china-playstyles/22', { picks: [1, 2, 3] }, 'tok-coach', fx.env);
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { error: string }).error).toContain('CPU');
+    expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM player_playstyles')?.n).toBe(0);
+  });
 });
 
 describe('成长期（用户规则 2026-09-18）：里程碑只算当期，宣告与窗口解耦', () => {

@@ -87,6 +87,8 @@ export interface VenueStadiumRow extends StadiumRow {
   venue_reputation: number;
   next_attendance_mod: number;
   attendance_mod_matches: number;
+  /** v6.84.0 转 CPU 不入账：由 clubs.is_cpu join 得到（0 人类队 / 1 CPU 队） */
+  is_cpu: number;
 }
 
 export async function loadAttendanceModel(db: Env['DB']): Promise<AttendanceModel> {
@@ -574,7 +576,10 @@ export async function windowHomeStatements(
   const stadiums = await env.DB
     .prepare(
       // v6.53.0：venue_reputation / next_attendance_mod / attendance_mod_matches 是窗末档期结算的 VenueContext 来源
-      'SELECT club_id, capacity, tier, shell_influence, bonus_points, fans, fans_window_start, venue_reputation, next_attendance_mod, attendance_mod_matches FROM stadiums',
+      // v6.84.0 转 CPU（设计稿 §6.7）：join clubs 取 is_cpu，CPU 队不进任何入账语句
+      `SELECT s.club_id, s.capacity, s.tier, s.shell_influence, s.bonus_points, s.fans, s.fans_window_start,
+              s.venue_reputation, s.next_attendance_mod, s.attendance_mod_matches, COALESCE(c.is_cpu, 0) AS is_cpu
+       FROM stadiums s LEFT JOIN clubs c ON c.id = s.club_id`,
     )
     .all<VenueStadiumRow>();
   // 设施等级一次批量查（青训级 → evolveFans 涨粉系数 ×(1+0.03n)，v6.6.3；草皮级 → 档期活动的收入加成与损坏减免，v6.9.0；
@@ -622,6 +627,17 @@ export async function windowHomeStatements(
   }
 
   for (const s of stadiums.results) {
+    // v6.84.0 转 CPU 不入账（设计稿 §6.7）：CPU 队只把窗初快照推进到现值，不生成维护费、冠名收租、
+    // 档期结算、涨粉演化语句，也不计入 maintenanceClubs/namingClubs/activityClubs 等 summary。
+    // 转换时的硬阻断已保证没有 active 冠名与当前窗档期，这道豁免防转换后管理端再订。
+    if (s.is_cpu === 1) {
+      statements.push(
+        env.DB
+          .prepare(`UPDATE stadiums SET fans_window_start = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE club_id = ?`)
+          .bind(s.fans, s.club_id),
+      );
+      continue;
+    }
     const tierEntry = tierTable[String(s.tier)];
     if (!tierEntry) {
       // 档位表缺该档位（配置异常）：本批照旧不演化/不收租，但窗初快照要推进到窗末现值，

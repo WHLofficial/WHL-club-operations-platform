@@ -1104,7 +1104,7 @@ export interface TriggerInput {
   windowSeq: number;
   actor: number | null;
   origin: AuditOrigin;
-  /** 不传 = 全部俱乐部 */
+  /** 不传 = 全部人类队（v6.84.0 起 CPU 队不进事件域；显式传入也会被过滤） */
   clubIds?: number[];
   /** 点名触发：绕过命中概率与条件（管理端强制上演） */
   eventId?: string;
@@ -1148,9 +1148,26 @@ export async function triggerEventBatch(env: Env, input: TriggerInput): Promise<
     }
   }
 
-  const clubIds =
-    input.clubIds ??
-    (await env.DB.prepare('SELECT id FROM clubs ORDER BY id').all<{ id: number }>()).results.map((r) => r.id);
+  // v6.84.0 转 CPU 不入账（设计稿 §6.7）：CPU 队不进事件域。
+  // 默认目标集只取人类队；显式 clubIds 同样先滤掉 CPU；全被滤空时返回 0，不静默改选其他队。
+  let clubIds: number[];
+  if (input.clubIds !== undefined) {
+    const ids = [...new Set(input.clubIds.filter((n) => Number.isInteger(n) && n > 0))];
+    const humanIds = new Set<number>();
+    if (ids.length > 0) {
+      const inList = ids.map(() => '?').join(',');
+      const rows = await env.DB
+        .prepare(`SELECT id FROM clubs WHERE id IN (${inList}) AND is_cpu = 0`)
+        .bind(...ids)
+        .all<{ id: number }>();
+      for (const r of rows.results) humanIds.add(r.id);
+    }
+    clubIds = ids.filter((id) => humanIds.has(id));
+  } else {
+    clubIds = (await env.DB.prepare('SELECT id FROM clubs WHERE is_cpu = 0 ORDER BY id').all<{ id: number }>()).results.map(
+      (r) => r.id,
+    );
+  }
   if (clubIds.length === 0) return { clubs: 0, triggered: 0, capped: 0, events: [] };
 
   const contexts = await loadEventContexts(env, clubIds, input.season, input.windowSeq);

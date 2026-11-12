@@ -1092,6 +1092,23 @@ describe('接班转正 activateQueuedStatements（TC-QUEUED）', () => {
     expect(countOf(fx.sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'naming_activated'")).toBe(1);
   });
 
+  it('TC-QUEUED-01b CPU 队的 queued 报价不转正（不再生成合同/审计）', async () => {
+    const fx = freshEnv();
+    seedClub(fx.sqlite);
+    openWindow(fx.sqlite);
+    await seedOpenRound(fx.env);
+    await signViaOffer(fx.env, 1, '星海通讯', 1);
+    const offerId = await seedOffer(fx.env, 1, '埃尔巴草本', 1);
+    await acceptOffer(fx.env, offerId, 1, 'queued', null);
+    fx.sqlite.exec('UPDATE clubs SET is_cpu = 1 WHERE id = 1');
+
+    const activation = await activateQueuedStatements(fx.env, 2, 1, 'user', null);
+    expect(activation.statements).toHaveLength(0);
+    expect(activation.activated).toHaveLength(0);
+    expect(offerRow(fx.sqlite, offerId).status).toBe('queued');
+    expect(countOf(fx.sqlite, "SELECT COUNT(*) AS n FROM naming_contracts WHERE brand = '埃尔巴草本'")).toBe(0);
+  });
+
   it('TC-QUEUED-02 仍有 active 的队跳过（语句照生成、执行期零改行、留在 queued）', async () => {
     const fx = freshEnv();
     seedClub(fx.sqlite);

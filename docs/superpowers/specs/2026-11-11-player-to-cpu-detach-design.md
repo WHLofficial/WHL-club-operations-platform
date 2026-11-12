@@ -1,9 +1,9 @@
 # 玩家队 → CPU 队反向转换设计
 
-- 日期：2026-11-11
-- 状态：设计稿，待实现
-- 目标版本：v6.79.0（暂定；当前线上 v6.78.0）
-- 口径拍板：保留阵容和合同；默认阻止在途人工状态；不做强制转换。
+- 日期：2026-11-11（2026-11-12 按高级评审修订）
+- 状态：已实现，本地待上线（v6.84.0；2026-11-12 全量验证 3,273 例通过）
+- 目标版本：v6.84.0（当前 package.json 6.83.0）
+- 口径拍板：保留阵容和合同；默认阻止在途人工状态；不做强制转换；现金与消费券退出流通；转换后 CPU 不入账；`transfer_banned=0`。
 
 ## 1. 背景
 
@@ -88,6 +88,10 @@
 - 该队 `contract_demands.status IN ('pending','countered','accepted')`；
 - 该队仍有 `fund_holds.status='held'`；
 - 关联的 open `review_tasks`；
+- 该队有 `event_occurrences.status='pending'` 的随机事件；
+- 该队有 `shop_orders.status='pending'` 的消费工单；
+- 该队有 `naming_contracts.status='active'` 的冠名合同（管理组先解约或等合同结束）；
+- 该队在当前开放窗有 `venue_bookings` 预订（管理组先把档期改空置）；
 - 建议名撞 `clubs.name` UNIQUE；
 - 建议名超过 40 字。
 
@@ -103,6 +107,8 @@
 - 赛事系统 `team.name` 以半角 `(CPU)` 结尾（tour 查无此队时允许缺失并给出警告）；
 - 该队绑定账号数为 0；
 - `ledger_accounts.balance=0` 且 `ledger_accounts.vouchers=0`；
+- 关窗批不再向该队入账：维护费、冠名收租、档期结算三处均为 0；
+- 随机事件触发目标集不含该队；
 - 没有 active 谈判/挂牌/报价/待审过户；
 - 合同与球员归属未被改动。
 
@@ -134,7 +140,9 @@
 - `src/worker/notify.ts:293`：站内信/QQ 只通知真人队；
 - `src/worker/routes/admin/vouchers.ts:46`：消费券只发真人队；
 - `src/worker/offers.ts:165`：CPU 卖方不能走报价；
-- `src/worker/workbench.ts`：工作台隐藏 CPU 队。
+- `src/worker/workbench.ts`：工作台隐藏 CPU 队；
+- `src/worker/home.ts:519-751` 关窗批：维护费、冠名收租、档期结算目前不区分 CPU（本次要补豁免）；
+- `src/worker/event-ops.ts:1152` `triggerEventBatch`：默认目标集是全部 `clubs`，点名也可带 CPU（本次要补过滤）。
 
 ### 4.4 生产快照（2026-11-11 只读）
 
@@ -175,7 +183,9 @@ P0 安全守卫
 
 - `requireCoach` 在确认已绑定后取绑定俱乐部；
 - 若 `club.is_cpu === 1`，抛 `HttpError(403, '该队已转为 CPU 队，请联系管理组')`；
-- 管理端 `requireAdmin` 分支在此前返回，不受影响。
+- OIDC 模式不再对 `ADMIN_PERMS` 提前返回：管理员只要绑定了 CPU 队，教练侧入口同样 403；
+- 兼容模式下 admin 与 coach 两个分支都先查 `getTeamBinding(...).bound`，已绑定则过 `assertNotCpuClub`。
+- 管理端 `/api/admin/*` 仍走 `requireAdmin`，不受这条教练守卫影响；受影响的只是复用 `requireCoach` 的教练端点。
 
 注意：
 
@@ -196,6 +206,8 @@ P0 安全守卫
    - 返回 409 `{ error: 'cpu_club', message: '该队已转为 CPU 队，不能绑定' }`。
 
 如果回滚失败：返回 502 并说明「绑定已建立但解绑失败，请联系管理组」；P0 守卫仍会挡住教练操作。
+
+这一段同时修现行 OIDC 模式的 502：当前 `getBoundClub(c.env, user.id, c.req.raw)` 复用 `requireCoach` 在绑定前缓存的 `bound=false`，auth 侧已绑定但本侧仍返回 502。改成绑定后不带 request 的真查（或直接查 `AUTH_DB.team_binding` 的 `club_id`），ROADMAP 单独记一条「代码推演定位，上线后以一次真实绑定验证」。
 
 ### 6.3 契约类型
 
@@ -271,8 +283,11 @@ export async function fetchCpuDetach(id: number): Promise<CpuDetachState> {
 - AUTH_DB 未使用且未过期的 `team_bind_code`（`used_at IS NULL AND expires_at > now`）；取不到时 `unusedCodes=[]` 并加 warning；
 - `contracts`：该队合同总数/active 数；
 - `players`：该队球员数；
-- `ledger_accounts.balance`；
-- 阻断项：active 谈判、未终态挂牌、pending/intent 报价、`pending_review` 过户、open review_tasks；
+- `ledger_accounts.balance` 与 `ledger_accounts.vouchers`；
+- `naming_contracts`：该队 `status='active'` 的合同；
+- `venue_bookings`：该队在当前 open 窗的预订数；
+- 阻断项：active 谈判、未终态挂牌、pending/intent 报价、`pending_review`/`signing` 过户、待签合同诉求、held 资金、open review_tasks、pending 随机事件、pending 消费工单、active 冠名合同、当前 open 窗档期；
+- `checks`：`isCpu/tourName/localName/bindings/codes/funds` 六项；`ready` 要求六项全 true 且 blockers 为空；
 - 名字：默认 `当前名 + '(CPU)'`（已带后缀则不变），校验 40 字与 UNIQUE。
 
 `blockers` 为空才 `ready=true`。
@@ -296,36 +311,45 @@ export async function fetchCpuDetach(id: number): Promise<CpuDetachState> {
 
 - body `{ name: string }`；
 - 服务端强制后缀与长度；
-- SQL 带 `NOT EXISTS` 阻断条件，避免「预检后、更新前」插入在途单：
+- SQL 带 `NOT EXISTS` 阻断条件，避免「预检后、更新前」插入在途单；状态集必须复用 `ACTIVE_LISTING_STATES_SQL` 与代码中的状态常量，不在文档示例里手写两态：
 
 ```sql
 UPDATE clubs
 SET name = ?, is_cpu = 1, transfer_banned = 0
 WHERE id = ? AND is_cpu = 0
   AND NOT EXISTS (SELECT 1 FROM negotiation_sessions s WHERE s.club_id = ? AND s.status = 'active')
-  AND NOT EXISTS (SELECT 1 FROM listings l WHERE l.seller_club_id = ? AND l.status IN ('active','matched_pending'))
+  AND NOT EXISTS (SELECT 1 FROM listings l WHERE l.seller_club_id = ? AND l.status IN ${ACTIVE_LISTING_STATES_SQL})
   AND NOT EXISTS (
     SELECT 1 FROM offers o
     WHERE (o.buyer_club_id = ? OR o.seller_club_id = ?)
       AND o.status IN ('pending','intent')
   )
-  AND NOT EXISTS (SELECT 1 FROM transfers t WHERE (t.from_club_id = ? OR t.to_club_id = ?) AND t.status = 'pending_review')
+  AND NOT EXISTS (SELECT 1 FROM transfers t WHERE (t.from_club_id = ? OR t.to_club_id = ?) AND t.status IN ('pending_review','signing'))
+  AND NOT EXISTS (SELECT 1 FROM contract_demands d WHERE d.club_id = ? AND d.status IN ('pending','countered','accepted'))
+  AND NOT EXISTS (SELECT 1 FROM fund_holds f WHERE f.club_id = ? AND f.status = 'held')
+  AND NOT EXISTS (SELECT 1 FROM event_occurrences e WHERE e.club_id = ? AND e.status = 'pending')
+  AND NOT EXISTS (SELECT 1 FROM shop_orders o2 WHERE o2.club_id = ? AND o2.status = 'pending')
+  AND NOT EXISTS (SELECT 1 FROM naming_contracts n WHERE n.club_id = ? AND n.status = 'active')
+  AND NOT EXISTS (
+    SELECT 1 FROM venue_bookings b
+    JOIN season_windows w ON w.season = b.season AND w.window_seq = b.window_seq
+    WHERE b.club_id = ? AND w.status = 'open'
+  )
 ```
 
-（实际 SQL 以各表真实状态值为准，实现时把状态集合收敛到一处常量；`contract_demands`、`signing`、`fund_holds` 同样进阻断。）
-
-- 同一 batch 内追加账本/券回收：负数流水与余额归零成对出现，金额按 batch 前余额计算，不读路由层快照；
-- 余额/券为 0 时不写流水；转换审计记录 `balanceBefore/vouchersBefore`；
+- 同一 batch 的语句顺序固定为：`UPDATE clubs` → 现金回收（账户 + 负数流水）→ 券回收（账户 + 负数流水）→ 审计；前三条都带同一 `updateGuard`，审计再要求回收后 `balance=0 AND vouchers=0`。
+- 回收金额不再取路由层快照：`ledgerReclaimAll` / `voucherReclaimAll` 在批内 SQL 读当前余额，`ledger_entries.amount=-balance`、`balance_after=0`；券同理。
+- 余额/券为 0 时不写流水；审计 `after` 的 `balanceBefore/balanceReclaimed/vouchersBefore/vouchersReclaimed` 全部由 `INSERT ... SELECT` 内的 `SUM(amount)` 计算，与流水同批落库。
 - `changes=0` 时重查预检：若已是 CPU 且名字相同，返回 `changed:false, flipped:false`；否则 409 `blocked`，带 blockers。
 - 撞 `clubs.name` UNIQUE 回 409 `name_taken`。
-- 成功写审计 `club_cpu_detach_local`，`after: { from, to, isCpu: 1, transferBanned: 0, balanceReclaimed, vouchersReclaimed }`。
+- 成功写审计 `club_cpu_detach_local`，`after: { from, to, isCpu: true, transferBanned: false, balanceBefore, balanceReclaimed, vouchersBefore, vouchersReclaimed }`。
 - 若 `is_cpu=1` 但名字不匹配（修复场景），允许只改名字，返回 `changed:true, flipped:false`；不能借此绕过阻断项。
 
 #### ③ 批量解绑
 
 `POST /api/admin/clubs/:id/to-cpu/unbind-all`，权限 `club.bindings.unbind`。
 
-- 执行时重新查全部绑定，不信预检快照；
+- 执行时重新查全部绑定，不信预检快照；先校验 `clubs.is_cpu=1`，否则 409 `{ error: 'not_cpu', message: '该队还不是 CPU 队，请先完成第③步' }`；绑定列表不再 `LIMIT 10`，返回截断标记（如需要）而不是静默截断；
 - 逐个 `authUnbindTeam`；
 - 成功进 `unbound`，`not_bound` 进 `alreadyUnbound`，其他错误进 `failed`；
 - 每成功一个写审计 `club_cpu_detach_unbind`，`before: { userId }`；
@@ -340,7 +364,22 @@ WHERE id = ? AND is_cpu = 0
 - `checks.localName`：本仓名后缀正确；
 - `checks.bindings`：绑定数 0；
 - `checks.codes`：无未使用未过期码（或仅 warning）；
-- `ready = 所有硬性 checks 为 true 且 blockers 为空`。
+- `checks.funds`：`ledger_accounts.balance=0 AND vouchers=0`；
+- `ready = 所有硬性 checks（六项）为 true 且 blockers 为空`。
+
+### 6.7 CPU 不入账：关窗批与事件域
+
+`src/worker/home.ts` 的 `windowHomeStatements`：
+
+- `stadiums` 查询 join `clubs` 取 `is_cpu`；
+- 循环内 CPU 队只推进 `fans_window_start = fans`，不生成维护费、冠名收租、档期结算、涨粉演化语句，也不计入 `maintenanceClubs/namingClubs/activityClubs` 等 summary；
+- 硬阻断已保证转换时没有 active 冠名/当前窗档期；这里仍保留豁免，防转换后管理端再订。
+
+`src/worker/event-ops.ts` 的 `triggerEventBatch`：
+
+- 默认目标集改为 `SELECT id FROM clubs WHERE is_cpu = 0 ORDER BY id`；
+- 显式 `input.clubIds` 先过滤 `is_cpu=1`；全部被过滤时返回 `{ clubs:0, triggered:0 }`，不静默改选其他队；
+- 点名 `eventId` 同样不落到 CPU 队。
 
 ## 7. UI 设计
 
@@ -375,7 +414,7 @@ WHERE id = ? AND is_cpu = 0
 2. **赛事侧改名**：默认建议名 `xxx(CPU)`；允许编辑，但提交时服务端强制后缀；失败可重试。
 3. **本仓改名 + 置 CPU**：`ConfirmButton` 二次确认；确认框写明「保留阵容和合同；转 CPU 后球员可被海捞，且 CPU 不收转会费」。
 4. **批量解绑**：列出全部绑定账号；确认后一次解绑；部分失败逐行显示并可重试。
-5. **复核**：展示五项检查和最终 `ready`。
+5. **复核**：展示六项检查和最终 `ready`。
 
 查询键：`CPU_DETACH_KEY(id)`；动作后 invalidate `CPU_DETACH_KEY`、`ADMIN_CLUBS_KEY`，必要时 invalidate 总览。
 
@@ -414,16 +453,22 @@ WHERE id = ? AND is_cpu = 0
 
 新增 `tests/cpu-detach.test.ts`：
 
-- 预检：2 个绑定、active 谈判、未终态挂牌、pending/intent 报价、待审过户分别命中阻断。
+- 预检：2 个绑定、active 谈判、未终态挂牌、pending/intent 报价、待审/签约过户、待签合同诉求、held 资金、open review、pending 事件、pending 消费工单、active 冠名合同、当前 open 窗档期分别命中阻断。
 - 干净队：`ready=true`，建议名正确。
 - 赛事改名：失败时本仓 `is_cpu`/名字不变；成功写审计。
-- 本仓改名：撞名 409；重放 `changed=false`；阻断条件命中时 `changes=0` 且返回 blockers。
+- 本仓改名：撞名 409；重放 `changed=false`；阻断条件命中时 `changes=0` 且返回 blockers；批前余额/券变动后仍按实际余额清零（流水、审计金额与实际一致）；未置 CPU 时 `unbind-all` 409。
 - 解绑：0/1/2 个绑定；`not_bound` 视为已解绑；一个 502 时部分成功、可重试。
-- 复核：`is_cpu=1`、两侧名后缀、绑定 0。
+- 复核：`is_cpu=1`、两侧名后缀、绑定 0、`funds` 六项；余额/券残留时 `ready=false`。
+
+### CPU 不入账
+
+- `windowHomeStatements`：CPU 队有球场/基建时，维护费、冠名收租、档期结算均为 0；`fans_window_start` 仍推进。
+- `triggerEventBatch`：默认目标集不含 CPU；显式 clubIds 全为 CPU 时返回 0；混合时只跑人类队。
+- `/clubs/bind`：OIDC 模式人类队绑定返回 201，不再 502（用真实一次绑定在生产复核）。
 
 ### 守卫
 
-- CPU 绑定教练访问 `/api/me/club` 和任一教练端点 → 403。
+- CPU 绑定教练访问 `/api/me/club` 和任一教练端点 → 403，包括管理员兼绑（OIDC 分支不提前放行）。
 - 管理端解绑 CPU 队仍 200。
 - `/clubs/bind` 用 CPU 队的码 → 409，且回滚为未绑定。
 - 人类队绑定不受影响。
@@ -435,14 +480,14 @@ WHERE id = ? AND is_cpu = 0
 - 人类队入口存在、CPU 队入口不存在；
 - 阻断项禁用后续按钮；
 - 部分解绑失败展示；
-- 复核五项通过。
+- 复核六项通过（含 `funds`），余额/券残留时不可 ready。
 
 ### 最坏情况
 
 - 2 个绑定 + 40 字队名 + 30 份合同 + active 谈判；
 - 解绑一个失败；
 - 预检 D1 读量约 10 条；教练守卫每请求多 1 条 D1 读（请求内记忆化）；
-- 批量解绑 N 个账号，生产最多 2 个，代码上限设 10。
+- 批量解绑 N 个账号，生产最多 2 个；代码不再 `LIMIT 10`，返回全部绑定。
 
 ### 命令
 
@@ -454,10 +499,11 @@ WHERE id = ? AND is_cpu = 0
 ## 10. 上线顺序
 
 1. P0 守卫（`binding.ts`、`session.ts`、`/clubs/bind`）+ 测试，先上线；
-2. 预检/改名/解绑端点 + 契约类型；
-3. `ToCpuPage` + 入口 + 测试；
-4. 文档、ROADMAP/CHANGELOG；
-5. 首次生产转换由管理端手动执行，需用户单独下令。
+2. 预检/改名/解绑端点 + 契约类型 + 冠名/档期阻断；
+3. CPU 不入账（`home.ts` 关窗批 + `event-ops.ts` 事件目标集）+ 测试；
+4. `ToCpuPage` + 入口 + 测试；
+5. 文档、ROADMAP/CHANGELOG；
+6. 首次生产转换由管理端手动执行，需用户单独下令。
 
 无 D1 迁移；代码回滚安全。
 

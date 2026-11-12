@@ -312,6 +312,69 @@ export interface CpuSeedOpsResult {
   leagueTier: 'premier' | 'second';
 }
 
+// ---- 玩家队 → CPU 队反向转换（v6.84.0）：五步向导（预检 → tour 改名 → 本仓改名/回收 → 解绑 → 复核）----
+
+/** 一条阻断/警告项：key 稳定供前端分支，label 是短标题，detail 是给人看的说明 */
+export interface CpuDetachBlocker {
+  key: string;
+  label: string;
+  detail: string;
+}
+
+/** GET /api/admin/clubs/:id/to-cpu 的预检/复核载荷（同一端点复用，checks 是复核五项） */
+export interface CpuDetachState {
+  club: { id: number; name: string; isCpu: boolean; leagueTier: string | null; status: string };
+  /** 赛事系统对手方；查无此队时为 null（转换允许缺失，checks.tourName 按通过处理） */
+  tour: { id: number; name: string } | null;
+  /** 该队全部绑定账号（转换前必须清零；服务端不截断，保证 unbind-all 能全解） */
+  bindings: { userId: number; userName: string | null; boundAt: string }[];
+  /** 未使用且未过期的绑定码（仅展示；转换后应作废，不影响 ready） */
+  unusedCodes: { expiresAt: string | null; createdAt: string }[];
+  /** 该队合同总数与 is_active=1 数（转换不动合同，只作展示） */
+  contracts: { active: number; total: number };
+  /** 该队球员数（转换后按无归属处理，可被海捞） */
+  players: number;
+  /** 现金余额（m）；转换会回收为 0 */
+  balance: number;
+  /** 消费券余额（m）；转换会回收为 0 */
+  vouchers: number;
+  /** 预填名与命名问题（null = 可用）；默认当前名 + '(CPU)'，已带后缀则不变 */
+  suggest: { newName: string; nameError: string | null };
+  /** 硬阻断：非空即 ready=false（预检与 rename-local 的 NOT EXISTS 同源） */
+  blockers: CpuDetachBlocker[];
+  /** 软提示：不影响 ready（未使用绑定码 / 招商轮排队 / tour 缺队 / 券回收说明） */
+  warnings: CpuDetachBlocker[];
+  /** 复核：isCpu / tourName（null 或后缀正确）/ localName / bindings（0 个）/ codes（无未使用码）/ funds（余额与券均为 0） */
+  checks: { isCpu: boolean; tourName: boolean; localName: boolean; bindings: boolean; codes: boolean; funds: boolean };
+  /** 所有硬性 checks 为 true 且 blockers 为空；还没转换的队不会 ready */
+  ready: boolean;
+}
+
+/** POST /api/admin/clubs/:id/to-cpu/rename-tour：renamed=false 表示对手方队名本就一致（幂等） */
+export interface CpuDetachRenameTourResult {
+  ok: boolean;
+  renamed: boolean;
+  name: string;
+}
+
+/** POST /api/admin/clubs/:id/to-cpu/rename-local：changed=false 表示已转换且同名（幂等）；
+ *  flipped=false 表示修复场景（已是 CPU、只改了名，未再回收） */
+export interface CpuDetachRenameLocalResult {
+  ok: boolean;
+  changed: boolean;
+  flipped: boolean;
+  name: string;
+}
+
+/** POST /api/admin/clubs/:id/to-cpu/unbind-all：not_bound 归 alreadyUnbound（可重试），
+ *  其他失败进 failed；ok = failed.length === 0 */
+export interface CpuDetachUnbindResult {
+  ok: boolean;
+  unbound: number[];
+  alreadyUnbound: number[];
+  failed: { userId: number; code: string; message: string }[];
+}
+
 // ---------------------------------------------------------------------------
 // 赛季（GET /api/seasons/current 公开 + /api/admin/seasons*）
 // worker 装配：routes/seasons.ts:34-46、routes/admin/seasons.ts:39-129、season-settle.ts
