@@ -487,6 +487,24 @@ describe('赛季结算（growable 重判+settled）与忠诚支出（v3.0.0 移�
     expect(fx.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'loyalty_charge'").get()).toEqual({ n: 1 });
   });
 
+  it('忠诚支出跳过 CPU 队：CPU 队现行合同不扣 loyalty', async () => {
+    const fx = freshEnv();
+    seedTourSchema(fx.tour);
+    seedClubWithTeam(fx.auth, fx.sqlite, 1, 11);
+    seedClubWithTeam(fx.auth, fx.sqlite, 2, 12);
+    fx.sqlite.prepare("UPDATE clubs SET is_cpu = 1 WHERE id = 2").run();
+    fx.sqlite.prepare(`INSERT INTO players (id, uid, name, club_id, age) VALUES (1, 'p1', '甲', 1, 24), (2, 'p2', '乙', 2, 24)`).run();
+    fx.sqlite
+      .prepare(`INSERT INTO contracts (id, player_id, club_id, release_fee, wage, service_ticks, is_active) VALUES
+        (1, 1, 1, 100, 3, 0, 1), (2, 2, 2, 100, 3, 0, 1)`)
+      .run();
+    const { statements, summary } = await loyaltyMovements(fx.env.DB, 1, 1, 1, 6);
+    expect(summary).toEqual({ count: 1, total: 20 });
+    await fx.env.DB.batch(statements);
+    const rows = fx.sqlite.prepare("SELECT club_id FROM ledger_entries WHERE kind = 'loyalty'").all() as { club_id: number }[];
+    expect(rows).toEqual([{ club_id: 1 }]);
+  });
+
   it('忠诚支出收官档：效力 ≥3.5 赛季免收（tiers 尾档 [3.5,0] ⇒ 不产生流水）', async () => {
     const fx = freshEnv();
     seedTourSchema(fx.tour);

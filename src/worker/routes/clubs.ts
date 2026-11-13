@@ -1472,6 +1472,15 @@ function namingContractDto(
 // status 产出点按契约收窄字面：listClubOffers 的 WHERE 恒只取
 // `(status='pending' AND round open) OR status='queued'`（market-ops.ts:119），行类型标宽是
 // D1 泛型的保守写法，这里断言不改变任何运行时行为。
+function offerBetTerms(raw: string): ReturnType<typeof parseBetTerms> {
+  try {
+    const p = JSON.parse(raw) as { betTerms?: unknown } | null;
+    return parseBetTerms(p && typeof p === 'object' && p.betTerms ? JSON.stringify(p.betTerms) : '');
+  } catch {
+    return null;
+  }
+}
+
 function offerDto(row: Awaited<ReturnType<typeof listClubOffers>>[number]): ClubOffer {
   return {
     id: row.id,
@@ -1485,6 +1494,8 @@ function offerDto(row: Awaited<ReturnType<typeof listClubOffers>>[number]): Club
     expireAt: row.expire_at,
     // v6.51.0 批 1：签下将命名为「品牌·球场名」（无球场名时空串，前端不加行）
     venueName: composeVenueName(row.brand, row.stadium_name),
+    // v6.84.4：报价期抽定的对赌条款；存量旧报价为 null（前端回落到签约时抽定文案）
+    betTerms: offerBetTerms(row.package_json),
     brandProfile: brandProfileDto({
       name_en: row.name_en,
       color: row.color,

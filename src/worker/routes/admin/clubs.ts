@@ -1030,7 +1030,8 @@ app.post('/clubs/:id/to-cpu/rename-tour', async (c) => {
   const club = await c.env.DB.prepare('SELECT id FROM clubs WHERE id = ?').bind(clubId).first<{ id: number }>();
   if (!club) throw new HttpError(404, '俱乐部不存在');
   const body = (await readJson(c)) as { name?: unknown } | null;
-  const name = typeof body?.name === 'string' ? body.name.trim() : '';
+  const rawName = typeof body?.name === 'string' ? body.name.trim() : '';
+  const name = rawName.replace(/\s*\(CPU\)\s*$/, '(CPU)');
   if (!name) throw new HttpError(400, '队名不能为空');
   if (!name.endsWith('(CPU)')) throw new HttpError(400, 'CPU 队名须以半角 (CPU) 结尾');
   if (name.length > 40) throw new HttpError(400, '队名最多 40 个字');
@@ -1066,7 +1067,8 @@ app.post('/clubs/:id/to-cpu/rename-local', async (c) => {
     .first<{ id: number; name: string; is_cpu: number; transfer_banned: number | null }>();
   if (!club) throw new HttpError(404, '俱乐部不存在');
   const body = (await readJson(c)) as { name?: unknown } | null;
-  const name = typeof body?.name === 'string' ? body.name.trim() : '';
+  const rawName = typeof body?.name === 'string' ? body.name.trim() : '';
+  const name = rawName.replace(/\s*\(CPU\)\s*$/, '(CPU)');
   if (!name) throw new HttpError(400, '队名不能为空');
   if (!name.endsWith('(CPU)')) throw new HttpError(400, 'CPU 队名须以半角 (CPU) 结尾');
   if (name.length > 40) throw new HttpError(400, '队名最多 40 个字');

@@ -31,7 +31,7 @@ function freshEnv(): Fixture {
     `CREATE TABLE user (id INTEGER PRIMARY KEY, name TEXT, role TEXT, locked INTEGER DEFAULT 0, must_change_pw INTEGER DEFAULT 0);
      INSERT INTO user (id, name, role, locked, must_change_pw) VALUES (1, '管理组甲', 'admin', 0, 0), (2, '教练乙', 'coach', 0, 0);
      CREATE TABLE team (id INTEGER PRIMARY KEY, org_id INTEGER NOT NULL, name TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z');
-     INSERT INTO team (id, org_id, name) VALUES (10, 1, '蓝月亮 (CPU)'), (20, 1, '待转队 (CPU)'), (40, 1, '修复队 (CPU)'), (50, 1, '重放队 (CPU)');`,
+     INSERT INTO team (id, org_id, name) VALUES (10, 1, '蓝月亮(CPU)'), (20, 1, '待转队(CPU)'), (40, 1, '修复队(CPU)'), (50, 1, '重放队(CPU)');`,
   );
   const kv = new Map<string, string>();
   const env: Env = {
@@ -123,22 +123,24 @@ afterEach(() => {
 });
 
 describe('cpuSuffixName 纯函数', () => {
-  it('无后缀时追加半角空格 + (CPU)，已有后缀不重复叠加', () => {
-    expect(cpuSuffixName('蓝月亮')).toBe('蓝月亮 (CPU)');
-    expect(cpuSuffixName('蓝月亮 (CPU)')).toBe('蓝月亮 (CPU)');
+  it('无后缀时追加半角(CPU)，已有后缀不重复叠加且不留空格', () => {
+    expect(cpuSuffixName('蓝月亮')).toBe('蓝月亮(CPU)');
+    expect(cpuSuffixName('蓝月亮(CPU)')).toBe('蓝月亮(CPU)');
+    expect(cpuSuffixName('蓝月亮 (CPU)')).toBe('蓝月亮(CPU)');
+    expect(cpuSuffixName('蓝月亮（CPU）')).toBe('蓝月亮（CPU）(CPU)');
     expect(cpuSuffixName('蓝月亮(CPU)   ')).toBe('蓝月亮(CPU)');
   });
 
   it('全角括号不算后缀（只认半角），空名退回裸后缀', () => {
-    expect(cpuSuffixName('蓝月亮（CPU）')).toBe('蓝月亮（CPU） (CPU)');
+    expect(cpuSuffixName('蓝月亮（CPU）')).toBe('蓝月亮（CPU）(CPU)');
     expect(cpuSuffixName('   ')).toBe('(CPU)');
   });
 
   it('40 字边界：追加后可能超长，交给 nameError 判定', () => {
     const name = cpuSuffixName('甲'.repeat(40));
-    expect(name.length).toBe(46);
+    expect(name.length).toBe(45);
     expect(name.endsWith('(CPU)')).toBe(true);
-    expect(cpuSuffixName('甲'.repeat(34)).length).toBe(40);
+    expect(cpuSuffixName('甲'.repeat(35)).length).toBe(40);
   });
 });
 
@@ -151,8 +153,8 @@ describe('GET /clubs/:id/to-cpu 预检', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as CpuDetachState;
     expect(body.club).toMatchObject({ id: 20, name: '待转队', isCpu: false, status: 'active' });
-    expect(body.tour).toEqual({ id: 20, name: '待转队 (CPU)' });
-    expect(body.suggest).toEqual({ newName: '待转队 (CPU)', nameError: null });
+    expect(body.tour).toEqual({ id: 20, name: '待转队(CPU)' });
+    expect(body.suggest).toEqual({ newName: '待转队(CPU)', nameError: null });
     expect(body.blockers).toEqual([]);
     expect(body.warnings).toEqual([]);
     expect(body.checks).toEqual({ isCpu: false, tourName: true, localName: false, bindings: true, codes: true, funds: true });
@@ -210,7 +212,7 @@ describe('GET /clubs/:id/to-cpu 预检', () => {
     seedClub(fx, 10, '蓝月亮');
     const auth = attachAuthChannel(fx.env);
     auth.exec(
-      `INSERT INTO team (id, tour_team_id, club_id, name, created_at) VALUES (1, 10, 10, '蓝月亮 (CPU)', '2026-01-01T00:00:00Z');
+      `INSERT INTO team (id, tour_team_id, club_id, name, created_at) VALUES (1, 10, 10, '蓝月亮(CPU)', '2026-01-01T00:00:00Z');
        INSERT INTO team_binding (account_id, team_id, bound_via, bound_at) VALUES (2, 1, 'code', '2026-01-03T00:00:00Z');
        INSERT INTO team_bind_code (team_id, code_hash, via, expires_at, created_at) VALUES (1, 'h1', 'club', '2099-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
          (1, 'h2', 'club', '2026-01-01T00:00:00Z', '2025-12-01T00:00:00Z');`,
@@ -231,9 +233,9 @@ describe('GET /clubs/:id/to-cpu 预检', () => {
     expect(body.suggest.nameError).toBe('队名最多 40 个字');
 
     seedClub(fx, 21, '撞名队');
-    seedClub(fx, 22, '撞名队 (CPU)');
+    seedClub(fx, 22, '撞名队(CPU)');
     body = (await (await get('/api/admin/clubs/21/to-cpu', fx.env)).json()) as CpuDetachState;
-    expect(body.suggest).toEqual({ newName: '撞名队 (CPU)', nameError: '已有俱乐部使用该名字' });
+    expect(body.suggest).toEqual({ newName: '撞名队(CPU)', nameError: '已有俱乐部使用该名字' });
   });
 
   it('tour 缺队只给 warning（对手方改名失败但不影响本仓）', async () => {
@@ -254,11 +256,11 @@ describe('GET /clubs/:id/to-cpu 预检', () => {
 });
 
 describe('POST /clubs/:id/to-cpu/rename-tour', () => {
-  it('服务端强制半角 (CPU) 结尾与 40 字上限', async () => {
+  it('服务端强制半角(CPU) 结尾与 40 字上限', async () => {
     const fx = freshEnv();
     seedClub(fx, 20, '待转队');
     expect((await post('/api/admin/clubs/20/to-cpu/rename-tour', { name: '待转队' }, fx.env)).status).toBe(400);
-    expect((await post('/api/admin/clubs/20/to-cpu/rename-tour', { name: `${'甲'.repeat(40)} (CPU)` }, fx.env)).status).toBe(400);
+    expect((await post('/api/admin/clubs/20/to-cpu/rename-tour', { name: `${'甲'.repeat(40)}(CPU)` }, fx.env)).status).toBe(400);
     expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM audit_log')?.n).toBe(0);
   });
 
@@ -266,7 +268,7 @@ describe('POST /clubs/:id/to-cpu/rename-tour', () => {
     const fx = freshEnv();
     seedClub(fx, 20, '待转队');
     stubTourFetch(() => ({ status: 500, json: { error: 'boom' } }));
-    const res = await post('/api/admin/clubs/20/to-cpu/rename-tour', { name: '待转队 (CPU)' }, fx.env);
+    const res = await post('/api/admin/clubs/20/to-cpu/rename-tour', { name: '待转队(CPU)' }, fx.env);
     expect(res.status).toBe(502);
     expect(((await res.json()) as { error: string }).error).toBe('tour_sync_failed');
     expect(sqlGet<{ name: string }>(fx.sqlite, 'SELECT name FROM clubs WHERE id = 20')?.name).toBe('待转队');
@@ -276,15 +278,15 @@ describe('POST /clubs/:id/to-cpu/rename-tour', () => {
   it('成功改名写 club_cpu_detach_tour；对手方已同名则 renamed=false 且不留审计', async () => {
     const fx = freshEnv();
     seedClub(fx, 20, '待转队');
-    stubTourFetch(() => ({ status: 200, json: { ok: true, renamed: true, name: '待转队 (CPU)' } }));
-    let body = (await (await post('/api/admin/clubs/20/to-cpu/rename-tour', { name: '待转队 (CPU)' }, fx.env)).json()) as CpuDetachRenameTourResult;
-    expect(body).toEqual({ ok: true, renamed: true, name: '待转队 (CPU)' });
+    stubTourFetch(() => ({ status: 200, json: { ok: true, renamed: true, name: '待转队(CPU)' } }));
+    let body = (await (await post('/api/admin/clubs/20/to-cpu/rename-tour', { name: '待转队(CPU)' }, fx.env)).json()) as CpuDetachRenameTourResult;
+    expect(body).toEqual({ ok: true, renamed: true, name: '待转队(CPU)' });
     const rows = audits(fx, 'club_cpu_detach_tour');
     expect(rows).toHaveLength(1);
-    expect(JSON.parse(rows[0].after ?? '{}')).toEqual({ from: '待转队 (CPU)', to: '待转队 (CPU)' });
+    expect(JSON.parse(rows[0].after ?? '{}')).toEqual({ from: '待转队(CPU)', to: '待转队(CPU)' });
 
-    stubTourFetch(() => ({ status: 200, json: { ok: true, renamed: false, name: '待转队 (CPU)' } }));
-    body = (await (await post('/api/admin/clubs/20/to-cpu/rename-tour', { name: '待转队 (CPU)' }, fx.env)).json()) as CpuDetachRenameTourResult;
+    stubTourFetch(() => ({ status: 200, json: { ok: true, renamed: false, name: '待转队(CPU)' } }));
+    body = (await (await post('/api/admin/clubs/20/to-cpu/rename-tour', { name: '待转队(CPU)' }, fx.env)).json()) as CpuDetachRenameTourResult;
     expect(body.renamed).toBe(false);
     expect(audits(fx, 'club_cpu_detach_tour')).toHaveLength(1);
   });
@@ -295,19 +297,19 @@ describe('POST /clubs/:id/to-cpu/rename-local', () => {
     const fx = freshEnv();
     seedClub(fx, 20, '待转队', 0, 1);
     seedFunds(fx, 20, 1500, 3);
-    const res = await post('/api/admin/clubs/20/to-cpu/rename-local', { name: '待转队 (CPU)' }, fx.env);
+    const res = await post('/api/admin/clubs/20/to-cpu/rename-local', { name: '待转队(CPU)' }, fx.env);
     expect(res.status).toBe(200);
     expect((await res.json()) as CpuDetachRenameLocalResult).toEqual({
       ok: true,
       changed: true,
       flipped: true,
-      name: '待转队 (CPU)',
+      name: '待转队(CPU)',
     });
     const club = sqlGet<{ name: string; is_cpu: number; transfer_banned: number }>(
       fx.sqlite,
       'SELECT name, is_cpu, transfer_banned FROM clubs WHERE id = 20',
     );
-    expect(club).toEqual({ name: '待转队 (CPU)', is_cpu: 1, transfer_banned: 0 });
+    expect(club).toEqual({ name: '待转队(CPU)', is_cpu: 1, transfer_banned: 0 });
     const account = sqlGet<{ balance: number; vouchers: number }>(
       fx.sqlite,
       'SELECT balance, vouchers FROM ledger_accounts WHERE club_id = 20',
@@ -327,7 +329,7 @@ describe('POST /clubs/:id/to-cpu/rename-local', () => {
     expect(rows).toHaveLength(1);
     expect(JSON.parse(rows[0].after ?? '{}')).toMatchObject({
       from: '待转队',
-      to: '待转队 (CPU)',
+      to: '待转队(CPU)',
       isCpu: true,
       transferBanned: false,
       balanceBefore: 1500,
@@ -341,7 +343,7 @@ describe('POST /clubs/:id/to-cpu/rename-local', () => {
     const fx = freshEnv();
     seedClub(fx, 20, '待转队');
     seedFunds(fx, 20, 0, 0);
-    expect((await post('/api/admin/clubs/20/to-cpu/rename-local', { name: '待转队 (CPU)' }, fx.env)).status).toBe(200);
+    expect((await post('/api/admin/clubs/20/to-cpu/rename-local', { name: '待转队(CPU)' }, fx.env)).status).toBe(200);
     expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM ledger_entries')?.n).toBe(0);
     expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM voucher_entries')?.n).toBe(0);
   });
@@ -353,7 +355,7 @@ describe('POST /clubs/:id/to-cpu/rename-local', () => {
     // 模拟预检后教练又花掉 100 现金、1 张券：回收金额必须取实际值
     fx.sqlite.exec('UPDATE ledger_accounts SET balance = 1400, vouchers = 2 WHERE club_id = 20');
 
-    expect((await post('/api/admin/clubs/20/to-cpu/rename-local', { name: '待转队 (CPU)' }, fx.env)).status).toBe(200);
+    expect((await post('/api/admin/clubs/20/to-cpu/rename-local', { name: '待转队(CPU)' }, fx.env)).status).toBe(200);
     expect(sqlGet<{ balance: number; vouchers: number }>(fx.sqlite, 'SELECT balance, vouchers FROM ledger_accounts WHERE club_id = 20')).toEqual({
       balance: 0,
       vouchers: 0,
@@ -365,12 +367,26 @@ describe('POST /clubs/:id/to-cpu/rename-local', () => {
     expect(after).toMatchObject({ balanceBefore: 1400, balanceReclaimed: 1400, vouchersBefore: 2, vouchersReclaimed: 2 });
   });
 
+  it('负余额也清零：写正数流水把债务归零', async () => {
+    const fx = freshEnv();
+    seedClub(fx, 20, '待转队');
+    seedFunds(fx, 20, -250, 0);
+
+    expect((await post('/api/admin/clubs/20/to-cpu/rename-local', { name: '待转队(CPU)' }, fx.env)).status).toBe(200);
+    expect(sqlGet<{ balance: number }>(fx.sqlite, 'SELECT balance FROM ledger_accounts WHERE club_id = 20')?.balance).toBe(0);
+    expect(
+      sqlAll<{ amount: number }>(fx.sqlite, "SELECT amount FROM ledger_entries WHERE club_id = 20 AND kind = 'cpu_detach_reclaim'"),
+    ).toEqual([{ amount: 250 }]);
+    const after = JSON.parse(audits(fx, 'club_cpu_detach_local')[0].after ?? '{}');
+    expect(after).toMatchObject({ balanceBefore: -250, balanceReclaimed: -250, vouchersBefore: 0, vouchersReclaimed: 0 });
+  });
+
   it('有阻断时 409 blocked：本仓零改动、不扣钱', async () => {
     const fx = freshEnv();
     seedClub(fx, 20, '待转队');
     seedFunds(fx, 20, 800, 0);
     fx.sqlite.prepare("INSERT INTO listings (id, player_id, seller_club_id, status) VALUES (1, 1, 20, 'listed')").run();
-    const res = await post('/api/admin/clubs/20/to-cpu/rename-local', { name: '待转队 (CPU)' }, fx.env);
+    const res = await post('/api/admin/clubs/20/to-cpu/rename-local', { name: '待转队(CPU)' }, fx.env);
     expect(res.status).toBe(409);
     const body = (await res.json()) as { error: string; blockers: { key: string }[] };
     expect(body.error).toBe('blocked');
@@ -383,8 +399,8 @@ describe('POST /clubs/:id/to-cpu/rename-local', () => {
     const fx = freshEnv();
     seedClub(fx, 20, '待转队');
     seedFunds(fx, 20, 100, 0);
-    seedClub(fx, 30, '待转队 (CPU)');
-    const res = await post('/api/admin/clubs/20/to-cpu/rename-local', { name: '待转队 (CPU)' }, fx.env);
+    seedClub(fx, 30, '待转队(CPU)');
+    const res = await post('/api/admin/clubs/20/to-cpu/rename-local', { name: '待转队(CPU)' }, fx.env);
     expect(res.status).toBe(409);
     expect(((await res.json()) as { error: string }).error).toBe('name_taken');
     expect(sqlGet<{ name: string; is_cpu: number }>(fx.sqlite, 'SELECT name, is_cpu FROM clubs WHERE id = 20')).toEqual({
@@ -396,15 +412,15 @@ describe('POST /clubs/:id/to-cpu/rename-local', () => {
 
   it('重放 changed=false：已转换且同名时零写入、不重复审计', async () => {
     const fx = freshEnv();
-    seedClub(fx, 50, '重放队 (CPU)', 1, 0);
+    seedClub(fx, 50, '重放队(CPU)', 1, 0);
     seedFunds(fx, 50, 0, 0);
-    const res = await post('/api/admin/clubs/50/to-cpu/rename-local', { name: '重放队 (CPU)' }, fx.env);
+    const res = await post('/api/admin/clubs/50/to-cpu/rename-local', { name: '重放队(CPU)' }, fx.env);
     expect(res.status).toBe(200);
     expect((await res.json()) as CpuDetachRenameLocalResult).toEqual({
       ok: true,
       changed: false,
       flipped: false,
-      name: '重放队 (CPU)',
+      name: '重放队(CPU)',
     });
     expect(audits(fx, 'club_cpu_detach_local')).toHaveLength(0);
   });
@@ -413,13 +429,13 @@ describe('POST /clubs/:id/to-cpu/rename-local', () => {
     const fx = freshEnv();
     seedClub(fx, 40, '修复队CPU', 1, 0);
     seedFunds(fx, 40, 500, 2);
-    const res = await post('/api/admin/clubs/40/to-cpu/rename-local', { name: '修复队 (CPU)' }, fx.env);
+    const res = await post('/api/admin/clubs/40/to-cpu/rename-local', { name: '修复队(CPU)' }, fx.env);
     expect(res.status).toBe(200);
     expect((await res.json()) as CpuDetachRenameLocalResult).toEqual({
       ok: true,
       changed: true,
       flipped: false,
-      name: '修复队 (CPU)',
+      name: '修复队(CPU)',
     });
     expect(sqlGet<{ balance: number; vouchers: number }>(fx.sqlite, 'SELECT balance, vouchers FROM ledger_accounts WHERE club_id = 40')).toEqual({
       balance: 500,
@@ -429,11 +445,11 @@ describe('POST /clubs/:id/to-cpu/rename-local', () => {
     expect(JSON.parse(rows[0].after ?? '{}')).toMatchObject({ repair: true, isCpu: true });
 
     fx.sqlite.prepare("INSERT INTO negotiation_sessions (id, club_id, status) VALUES (1, 40, 'active')").run();
-    const blocked = await post('/api/admin/clubs/40/to-cpu/rename-local', { name: '整队 (CPU)' }, fx.env);
+    const blocked = await post('/api/admin/clubs/40/to-cpu/rename-local', { name: '整队(CPU)' }, fx.env);
     expect(blocked.status).toBe(409);
   });
 
-  it('名字不带 (CPU) 后缀直接 400', async () => {
+  it('名字不带(CPU) 后缀直接 400', async () => {
     const fx = freshEnv();
     seedClub(fx, 20, '待转队');
     expect((await post('/api/admin/clubs/20/to-cpu/rename-local', { name: '待转队' }, fx.env)).status).toBe(400);
@@ -449,9 +465,9 @@ describe('POST /clubs/:id/to-cpu/unbind-all', () => {
 
   it('0 个绑定：ok 且三数组为空', async () => {
     const fx = freshEnv();
-    seedClub(fx, 10, '蓝月亮 (CPU)', 1);
+    seedClub(fx, 10, '蓝月亮(CPU)', 1);
     const auth = attachAuthChannel(fx.env);
-    auth.prepare("INSERT INTO team (id, tour_team_id, club_id, name, created_at) VALUES (1, 10, 10, '蓝月亮 (CPU)', '2026-01-01T00:00:00Z')").run();
+    auth.prepare("INSERT INTO team (id, tour_team_id, club_id, name, created_at) VALUES (1, 10, 10, '蓝月亮(CPU)', '2026-01-01T00:00:00Z')").run();
     const res = await post('/api/admin/clubs/10/to-cpu/unbind-all', {}, fx.env);
     expect(res.status).toBe(200);
     expect((await res.json()) as CpuDetachUnbindResult).toEqual({ ok: true, unbound: [], alreadyUnbound: [], failed: [] });
@@ -461,7 +477,7 @@ describe('POST /clubs/:id/to-cpu/unbind-all', () => {
     const fx = freshEnv();
     seedClub(fx, 10, '蓝月亮');
     const auth = attachAuthChannel(fx.env);
-    auth.prepare("INSERT INTO team (id, tour_team_id, club_id, name, created_at) VALUES (1, 10, 10, '蓝月亮 (CPU)', '2026-01-01T00:00:00Z')").run();
+    auth.prepare("INSERT INTO team (id, tour_team_id, club_id, name, created_at) VALUES (1, 10, 10, '蓝月亮(CPU)', '2026-01-01T00:00:00Z')").run();
     seedBinding(auth, 2);
     const res = await post('/api/admin/clubs/10/to-cpu/unbind-all', {}, fx.env);
     expect(res.status).toBe(409);
@@ -471,9 +487,9 @@ describe('POST /clubs/:id/to-cpu/unbind-all', () => {
 
   it('1 个绑定：解绑成功并写 club_cpu_detach_unbind 审计', async () => {
     const fx = freshEnv();
-    seedClub(fx, 10, '蓝月亮 (CPU)', 1);
+    seedClub(fx, 10, '蓝月亮(CPU)', 1);
     const auth = attachAuthChannel(fx.env);
-    auth.prepare("INSERT INTO team (id, tour_team_id, club_id, name, created_at) VALUES (1, 10, 10, '蓝月亮 (CPU)', '2026-01-01T00:00:00Z')").run();
+    auth.prepare("INSERT INTO team (id, tour_team_id, club_id, name, created_at) VALUES (1, 10, 10, '蓝月亮(CPU)', '2026-01-01T00:00:00Z')").run();
     seedBinding(auth, 2);
     const res = await post('/api/admin/clubs/10/to-cpu/unbind-all', {}, fx.env);
     expect((await res.json()) as CpuDetachUnbindResult).toEqual({ ok: true, unbound: [2], alreadyUnbound: [], failed: [] });
@@ -485,9 +501,9 @@ describe('POST /clubs/:id/to-cpu/unbind-all', () => {
 
   it('2 个绑定：全部解绑（按账号序）', async () => {
     const fx = freshEnv();
-    seedClub(fx, 10, '蓝月亮 (CPU)', 1);
+    seedClub(fx, 10, '蓝月亮(CPU)', 1);
     const auth = attachAuthChannel(fx.env);
-    auth.prepare("INSERT INTO team (id, tour_team_id, club_id, name, created_at) VALUES (1, 10, 10, '蓝月亮 (CPU)', '2026-01-01T00:00:00Z')").run();
+    auth.prepare("INSERT INTO team (id, tour_team_id, club_id, name, created_at) VALUES (1, 10, 10, '蓝月亮(CPU)', '2026-01-01T00:00:00Z')").run();
     seedBinding(auth, 3);
     seedBinding(auth, 2);
     const res = await post('/api/admin/clubs/10/to-cpu/unbind-all', {}, fx.env);
@@ -497,9 +513,9 @@ describe('POST /clubs/:id/to-cpu/unbind-all', () => {
 
   it('部分失败不回滚：成功/已解绑/失败分组，ok=false 可重试', async () => {
     const fx = freshEnv();
-    seedClub(fx, 10, '蓝月亮 (CPU)', 1);
+    seedClub(fx, 10, '蓝月亮(CPU)', 1);
     const auth = attachAuthChannel(fx.env);
-    auth.prepare("INSERT INTO team (id, tour_team_id, club_id, name, created_at) VALUES (1, 10, 10, '蓝月亮 (CPU)', '2026-01-01T00:00:00Z')").run();
+    auth.prepare("INSERT INTO team (id, tour_team_id, club_id, name, created_at) VALUES (1, 10, 10, '蓝月亮(CPU)', '2026-01-01T00:00:00Z')").run();
     seedBinding(auth, 2);
     seedBinding(auth, 3);
     seedBinding(auth, 4);
@@ -529,10 +545,10 @@ describe('POST /clubs/:id/to-cpu/unbind-all', () => {
 describe('GET /clubs/:id/to-cpu 复核（转换后）', () => {
   it('六项全通过 → ready=true', async () => {
     const fx = freshEnv();
-    seedClub(fx, 10, '蓝月亮 (CPU)', 1);
+    seedClub(fx, 10, '蓝月亮(CPU)', 1);
     seedFunds(fx, 10, 0, 0);
     const auth = attachAuthChannel(fx.env);
-    auth.prepare("INSERT INTO team (id, tour_team_id, club_id, name, created_at) VALUES (1, 10, 10, '蓝月亮 (CPU)', '2026-01-01T00:00:00Z')").run();
+    auth.prepare("INSERT INTO team (id, tour_team_id, club_id, name, created_at) VALUES (1, 10, 10, '蓝月亮(CPU)', '2026-01-01T00:00:00Z')").run();
     const body = (await (await get('/api/admin/clubs/10/to-cpu', fx.env)).json()) as CpuDetachState;
     expect(body.checks).toEqual({ isCpu: true, tourName: true, localName: true, bindings: true, codes: true, funds: true });
     expect(body.balance).toBe(0);
@@ -546,7 +562,7 @@ describe('GET /clubs/:id/to-cpu 复核（转换后）', () => {
     seedClub(fx, 10, '蓝月亮', 1);
     seedFunds(fx, 10, 50, 1);
     const auth = attachAuthChannel(fx.env);
-    auth.prepare("INSERT INTO team (id, tour_team_id, club_id, name, created_at) VALUES (1, 10, 10, '蓝月亮 (CPU)', '2026-01-01T00:00:00Z')").run();
+    auth.prepare("INSERT INTO team (id, tour_team_id, club_id, name, created_at) VALUES (1, 10, 10, '蓝月亮(CPU)', '2026-01-01T00:00:00Z')").run();
     auth.exec("INSERT INTO team_binding (account_id, team_id, bound_via, bound_at) VALUES (2, 1, 'code', '2026-01-03T00:00:00Z')");
     const body = (await (await get('/api/admin/clubs/10/to-cpu', fx.env)).json()) as CpuDetachState;
     expect(body.checks.localName).toBe(false);

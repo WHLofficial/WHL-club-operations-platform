@@ -10878,3 +10878,84 @@ button.sqc-pos:hover {
     padding: 9px 14px;
   }
 }
+
+/* 冠名报价卡（v6.84.4）：把原先混在单个 <p> 里的品牌/价格/条款/按钮拆成卡片行，手机不再行内折行。 */
+.naming-offers {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.naming-offer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+}
+
+.naming-offer-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.naming-offer-brand {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  font-size: 15px;
+}
+
+.naming-offer-sub,
+.naming-offer-meta {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.naming-offer-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+}
+
+.naming-offer-price {
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.naming-offer-terms {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--terracotta);
+  background: rgba(43, 29, 18, .04);
+  border-radius: 0 10px 10px 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.naming-offer-terms-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+}
+
+.naming-offer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.naming-offer-actions .btn {
+  margin-left: 0;
+}

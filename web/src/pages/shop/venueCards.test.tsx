@@ -211,3 +211,62 @@ describe('v6.65.3 冠名退约确认弹窗先亮赔款', () => {
     expect(String(confirmSpy.mock.calls[0]![0])).toContain('无赔金');
   });
 });
+
+// ---------------------------------------------------------------------------
+// v6.84.4 冠名报价卡片化 + 对赌条款报价期展示
+describe('v6.84.4 冠名报价卡', () => {
+  const betTerms = {
+    v: 2 as const,
+    seed: [9, 2, 112172, 1],
+    p: 0.5,
+    strength: 'mid' as const,
+    backtest: { hitRate: null, windows: 0 },
+    dropped: [],
+    items: [
+      { m: 'attend' as const, threshold: 0.72, baseline: 0.65, nBase: 10, pTarget: 0.5, guard: '' as const },
+      { m: 'fans' as const, threshold: 0.04, baseline: 0.03, nBase: 10, pTarget: 0.5, guard: '' as const },
+    ],
+  };
+
+  function renderNaming(quote: Record<string, unknown>) {
+    apiMock.mockImplementation((path: string) => {
+      if (path === '/api/club/naming/quote') return Promise.resolve(quote);
+      return Promise.reject(new Error(`未预期的请求：${path}`));
+    });
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter>
+          <NamingCard />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+  }
+
+  const baseOffer = {
+    id: 1,
+    brand: '奥维恩',
+    tier: '新兴',
+    industry: '零售',
+    packageNo: 3,
+    amount: 2.5,
+    windows: 4,
+    status: 'pending',
+    expireAt: '9999-12-31T00:00:00.000Z',
+    venueName: '奥维恩·球场1',
+    brandProfile: null,
+  };
+
+  it('有条款快照：直接展示指标与阈值，不写「签约时随机抽」', async () => {
+    renderNaming({ offers: [{ ...baseOffer, betTerms }] });
+    expect(await screen.findByText('对赌条款')).toBeTruthy();
+    expect(screen.getByText(/上座率 达/)).toBeTruthy();
+    expect(screen.getByText(/死忠增长 达/)).toBeTruthy();
+    expect(screen.queryByText(/签约时随机抽/)).toBeNull();
+  });
+
+  it('存量旧报价：显示「签约确认时抽定条款」', async () => {
+    renderNaming({ offers: [{ ...baseOffer, betTerms: null }] });
+    expect(await screen.findByText('存量报价：签约确认时抽定条款')).toBeTruthy();
+  });
+});

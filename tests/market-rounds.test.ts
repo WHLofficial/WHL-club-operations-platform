@@ -12,6 +12,7 @@ import { CONFIG_KEYS, resetConfigCache } from '../src/core/config.ts';
 import {
   acceptOffer,
   activateQueuedStatements,
+  backfillOfferBetTerms,
   buildRoundStatements,
   getOpenRound,
   listClubOffers,
@@ -21,6 +22,7 @@ import {
   spawnVisitOffer,
 } from '../src/worker/market-ops.ts';
 import {
+  buildBetTerms,
   getActiveNaming,
   loadHeatRules,
   windowNamingStatements,
@@ -137,6 +139,10 @@ function offerRows(sqlite: DatabaseSync, where = '', ...params: (string | number
 
 function offerRow(sqlite: DatabaseSync, id: number): OfferRow {
   return sqlGet<OfferRow>(sqlite, 'SELECT * FROM market_offers WHERE id = ?', id)!;
+}
+
+function sqliteSetPackageJson(sqlite: DatabaseSync, id: number, pkg: unknown) {
+  sqlite.prepare('UPDATE market_offers SET package_json = ? WHERE id = ?').run(JSON.stringify(pkg), id);
 }
 
 /** 某品牌在该轮出手的俱乐部 id（升序） */
@@ -309,6 +315,64 @@ describe('招商轮清盘与开轮（TC-ROUND）', () => {
     expect(old.status).toBe('settled');
     expect(old.settled_at).not.toBeNull();
     expect(await getOpenRound(fx.env.DB)).not.toBeNull();
+  });
+
+  it('TC-ROUND-10 对赌报价在开轮时抽定条款快照，签约不再重抽', async () => {
+    const fx = freshEnv();
+    seedClub(fx.sqlite);
+    openWindow(fx.sqlite);
+    await openRound(fx.env, 1, 1);
+    const betOffers = offerRows(fx.sqlite, 'WHERE package_no = 3');
+    expect(betOffers.length).toBeGreaterThan(0);
+    const first = betOffers[0]!;
+    const pkg = JSON.parse(first.package_json) as { betTerms?: { v: number; items: unknown[] } };
+    expect(pkg.betTerms?.v).toBe(2);
+    expect(pkg.betTerms?.items).toHaveLength(2);
+    const brand = sqlGet<{ brand: string }>(fx.sqlite, 'SELECT brand FROM brand_pool WHERE id = ?', first.brand_id)!;
+    expect(pkg.betTerms).toEqual(await buildBetTerms(fx.env, first.club_id, brand.brand, 1, 1));
+
+    // 签约读取报价快照：即使把阈值改掉，合同也应逐字落这份快照，而不是现抽
+    const tampered = { ...pkg.betTerms!, items: (pkg.betTerms!.items as { threshold: number }[]).map((it) => ({ ...it, threshold: it.threshold + 777 })) };
+    sqliteSetPackageJson(fx.sqlite, first.id, { ...pkg, betTerms: tampered });
+    await acceptOffer(fx.env, first.id, first.club_id, undefined, null);
+    const contract = sqlGet<{ bet_terms: string }>(
+      fx.sqlite,
+      'SELECT bet_terms FROM naming_contracts WHERE club_id = ? AND status = ?',
+      first.club_id,
+      'active',
+    )!;
+    expect(JSON.parse(contract.bet_terms)).toEqual(tampered);
+  });
+
+  it('TC-ROUND-11 存量对赌报价缺少 betTerms：签约时补抽（兼容旧报价）', async () => {
+    const fx = freshEnv();
+    seedClub(fx.sqlite);
+    openWindow(fx.sqlite);
+    const offerId = await seedOffer(fx.env, 1, '凯利昂生物', 3);
+    await acceptOffer(fx.env, offerId, 1, undefined, null);
+    const contract = sqlGet<{ bet_terms: string }>(
+      fx.sqlite,
+      'SELECT bet_terms FROM naming_contracts WHERE club_id = 1 AND status = ?',
+      'active',
+    )!;
+    expect((JSON.parse(contract.bet_terms) as { v: number }).v).toBe(2);
+  });
+
+  it('TC-ROUND-12 存量对赌报价补抽：只改 package_json 并留审计', async () => {
+    const fx = freshEnv();
+    seedClub(fx.sqlite);
+    openWindow(fx.sqlite);
+    const offerId = await seedOffer(fx.env, 1, '凯利昂生物', 3);
+    const out = await backfillOfferBetTerms(fx.env, 99);
+    expect(out).toEqual({ updated: 1, skipped: 0 });
+    const row = offerRow(fx.sqlite, offerId);
+    const pkg = JSON.parse(row.package_json) as { betTerms?: { v: number; items: unknown[] } };
+    expect(pkg.betTerms?.v).toBe(2);
+    expect(pkg.betTerms?.items).toHaveLength(2);
+    expect(
+      countOf(fx.sqlite, `SELECT COUNT(*) AS n FROM audit_log WHERE action = 'naming_bet_terms_backfill' AND target_id = ?`, offerId),
+    ).toBe(1);
+    expect(await backfillOfferBetTerms(fx.env, 99)).toEqual({ updated: 0, skipped: 1 });
   });
 
   it('TC-ROUND-02 无 open 轮：settle 段为空、hadOpenRound=false', async () => {

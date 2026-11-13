@@ -271,8 +271,10 @@ export async function loyaltyMovements(
 
   const contracts = await db
     .prepare(
-      `SELECT id, club_id, release_fee, service_ticks FROM contracts
-       WHERE is_active = 1 AND club_id IS NOT NULL AND release_fee IS NOT NULL`,
+      `SELECT ct.id, ct.club_id, ct.release_fee, ct.service_ticks FROM contracts ct
+       JOIN clubs c ON c.id = ct.club_id
+       WHERE ct.is_active = 1 AND ct.club_id IS NOT NULL AND ct.release_fee IS NOT NULL
+         AND COALESCE(c.is_cpu, 0) = 0`,
     )
     .all<{ id: number; club_id: number; release_fee: number; service_ticks: number | null }>();
 

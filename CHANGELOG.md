@@ -4,6 +4,35 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.84.4] · 冠名报价卡片化、对赌条款报价期抽定（2026-11-13，本地完成，未上线）
+
+**Changed**
+
+- 冠名市场报价卡从单个 `<p>` 行内混排改为独立卡片：品牌/档位徽标、套餐与属地、价格、有效期与落点名、对赌条款、底部操作区分行展示；手机窄屏不再把品牌、价格、条款和按钮挤成一段。`venueCards.tsx` 的 `offerRow` 改为 `<article className="naming-offer">`，样式新增 `.naming-offers` / `.naming-offer-*`（`web/src/styles.css`）。
+- 对赌报价在**报价生成时**抽定 `betTerms` 并写入 `market_offers.package_json`：主批量开轮（`buildRoundStatements`）与「品牌上门」事件（`spawnVisitOffer`）同一口径；`offerDto` 下发 `betTerms`，卡片直接展示指标与阈值。签约（`acceptOffer`）和 queued 转正（`activateQueuedStatements`）优先读报价快照，不再重抽；存量无快照报价仅在签约/转正时兜底补抽。
+- 新增管理员一次性运维端点 `POST /api/admin/market/backfill-bet-terms`：给现存 pending/queued 对赌报价补写 `betTerms`，只改 `package_json`，不碰金额、球队、合同；用报价所属轮的 `opened_season/opened_window` 作 seed，幂等并逐条写 `naming_bet_terms_backfill` 审计。
+- 合同页对赌说明由「签约时按品牌偏好抽定」改为「报价期按品牌偏好抽定，合同期内不重抽」。
+
+**Verification**
+
+- `tests/market-rounds.test.ts` 新增：开轮时对赌报价带 `betTerms` 且与 `buildBetTerms` 逐字一致；改掉报价快照阈值后签约合同仍落快照；存量报价无快照时签约兜底补抽；`backfillOfferBetTerms` 只补缺失项、二次调用跳过、审计留痕。
+- `web/src/pages/shop/venueCards.test.tsx` 新增：有快照时展示「对赌条款」与具体指标，不再出现「签约时随机抽」；存量报价显示「签约确认时抽定条款」。
+- `npm run typecheck` 三份清；`npm test` **213 文件 / 3,283 例**全绿；`npm run build` 4.26s 通过。
+
+## [v6.84.3] · 转 CPU：负余额清零、CPU 队不再扣忠诚支出、队名后缀无空格（2026-11-13，本地完成，未上线）
+
+**Fixed**
+
+- `ledgerReclaimAll` 的账户条件从 `balance > 0` 改为 `balance <> 0`：财政为负时也写一条正数流水（`amount = -balance`，即债务结清）并把余额归零，不再留下负余额导致第⑤步 `funds` 永远不通过。负余额场景审计仍记 `balanceBefore = -X`、`balanceReclaimed = -X`（表示注入 X 清零）。
+- `loyaltyMovements` 查现行合同时 join `clubs` 并加 `COALESCE(is_cpu,0)=0`：CPU 队不再在关窗批被扣忠诚支出。此前工资/富人税已豁免，忠诚支出漏了；已转 CPU 的佛罗伦萨在 2026-11-13 03:16Z 被扣 −43.35 即此因。
+- `cpuSuffixName` 生成的队名不再在 `(CPU)` 前加空格（`待转队(CPU)`）；两个 to-cpu 改名端点先把输入规范化为无空格后缀再校验/落库，已带空格的旧名也会被纠正。
+
+**Verification**
+
+- `tests/cpu-detach.test.ts` 新增「负余额也清零：写正数流水把债务归零」：负余额 −250 转换后账户为 0、流水 `amount=250`、审计四金额正确；后缀断言改为无空格并覆盖旧空格名归一化；30/30 通过。
+- `tests/season-settle.test.ts` 新增「忠诚支出跳过 CPU 队」：CPU 队现行合同不产生 loyalty 流水；23/23 通过。
+- `npm run typecheck` 三份清；`npm test` **213 文件 / 3,278 例**全绿；`npm run build` 4.47s 通过。
+
 ## [v6.84.2] · 冠名市场与消费中心时段解耦、站内信落点修正（2026-11-13，已上线 Version ac58a768）
 
 **Fixed**

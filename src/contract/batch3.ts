@@ -382,6 +382,8 @@ export interface ClubOffer {
   expireAt: string;
   /** 签下将命名的球场名（v6.51.0）：无球场名时空串（前端不加行） */
   venueName: string;
+  /** 对赌条款快照（v6.84.4）：报价期抽定；null = 非对赌套餐或存量旧报价 */
+  betTerms: BetTerms | null;
   /** 品牌企业档案（v6.51.0 批 2） */
   brandProfile: BrandProfile | null;
 }

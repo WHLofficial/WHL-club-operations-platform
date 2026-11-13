@@ -4,10 +4,10 @@
 export const CPU_SUFFIX_RE = /\(CPU\)\s*$/;
 
 /**
- * 建议队名 = 当前名 + ' (CPU)'：已带后缀（含尾随空格写法）不重复叠加，与 strip 互逆。
+ * 建议队名 = 当前名 + '(CPU)'：已带后缀（含空格/尾随空格写法）不重复叠加，并统一去掉后缀前的空格。
  */
 export function cpuSuffixName(name: string): string {
-  const base = name.trim();
+  const base = name.trim().replace(/\s*\(CPU\)\s*$/, '');
   if (!base) return '(CPU)';
-  return CPU_SUFFIX_RE.test(base) ? base : `${base} (CPU)`;
+  return `${base}(CPU)`;
 }

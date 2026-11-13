@@ -7,6 +7,7 @@ import { writeAudit } from '../../../lib/audit.ts';
 import { HttpError } from '../../../lib/http.ts';
 import { createConfigService } from '../../../core/config.ts';
 import { adminVoidBid, adminForceSettle, adminForceVoid, adminForceSign, adminRevertDeal, requireReason } from '../../market-intervene.ts';
+import { backfillOfferBetTerms } from '../../market-ops.ts';
 // 契约类型锚点（v6.82.0 第 4 批）：窗口三端点与看板的 c.json 泛型以 src/contract/batch4.ts 为真源
 // （开/关窗回执由 window-machine 的 return 标注互锁，这里泛型是第二道编译期锁）。
 import type { CloseWindowResult, OpenWindowResult, WindowOverviewRow, WindowsResponse } from '../../../contract/batch4.ts';
@@ -22,6 +23,15 @@ import { readJson } from './shared.ts';
 const app = new Hono<{ Bindings: Env }>();
 
 // ---- 市场干预（v1.3.0：管理介入扩权，撤/关/裁定工具） ----
+
+// 存量对赌报价补抽（v6.84.4 一次性运维）：只补 package_json.betTerms，不动金额/球队/合同。
+app.post('/market/backfill-bet-terms', async (c) => {
+  const user = await requireAdmin(c.env, c.req.raw);
+  const body = (await readJson(c)) as Record<string, unknown> | null;
+  await requireReason(body);
+  const result = await backfillOfferBetTerms(c.env, user.id);
+  return c.json({ ok: true, ...result });
+});
 
 app.post('/market/bids/:id/void', async (c) => {
   const user = await requireAdmin(c.env, c.req.raw);

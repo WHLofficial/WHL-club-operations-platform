@@ -31,6 +31,7 @@ import {
   parsePreferTags,
   terminatePenaltyOf,
   tierQuotaOf,
+  type BetTerms,
   type NamingContractRow,
 } from './naming-ops.ts';
 import { leagueStandings } from './season-settle.ts';
@@ -124,6 +125,71 @@ export async function listClubOffers(db: Env['DB'], clubId: number): Promise<Clu
 }
 
 // ---- 定向递价（纯函数，插件 _targeted_offers / _brand_package 口径） ----
+
+/** 存量对赌报价补抽（v6.84.4 一次性运维）：给没有 betTerms 的 pending/queued 对赌报价补一份
+ *  报价期快照，只改 package_json，不动金额/球队/合同；用报价所属轮的 season/window 作 seed，
+ *  与正常生成同口径。返回 updated/skipped 供管理端回执。 */
+export async function backfillOfferBetTerms(
+  env: Env,
+  actor: number | null,
+): Promise<{ updated: number; skipped: number }> {
+  const db = env.DB;
+  const rows = (
+    await db
+      .prepare(
+        `SELECT o.id, o.club_id, o.package_no, o.package_json, b.brand,
+                r.opened_season, r.opened_window
+         FROM market_offers o
+         JOIN brand_pool b ON b.id = o.brand_id
+         JOIN market_rounds r ON r.id = o.round_id
+         WHERE o.package_no = 3 AND o.status IN ('pending','queued')
+         ORDER BY o.id`,
+      )
+      .all<{
+        id: number;
+        club_id: number;
+        package_no: number;
+        package_json: string;
+        brand: string;
+        opened_season: number;
+        opened_window: number;
+      }>()
+  ).results;
+  const audit = createAuditStatement(db);
+  const statements: ReturnType<Env['DB']['prepare']>[] = [];
+  let updated = 0;
+  for (const row of rows) {
+    let pkg: Record<string, unknown>;
+    try {
+      pkg = JSON.parse(row.package_json) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    if (pkg.betTerms) continue;
+    const betTerms = await buildBetTerms(env, row.club_id, row.brand, row.opened_season, row.opened_window);
+    const nextJson = JSON.stringify({ ...pkg, betTerms });
+    statements.push(
+      db
+        .prepare(`UPDATE market_offers SET package_json = ? WHERE id = ? AND package_json = ?`)
+        .bind(nextJson, row.id, row.package_json),
+    );
+    statements.push(
+      audit({
+        actor,
+        action: 'naming_bet_terms_backfill',
+        targetType: 'market_offer',
+        targetId: row.id,
+        origin: 'user',
+        before: { hasBetTerms: false },
+        after: { betTerms },
+        guardSql: 'changes() > 0',
+      }),
+    );
+    updated += 1;
+  }
+  if (statements.length > 0) await db.batch(statements);
+  return { updated, skipped: rows.length - updated };
+}
 
 /** 套餐按档位：头部大牌只做短约（进取），新兴 / 口碑走稳健。 */
 export function packageNoForTier(tier: string): 1 | 2 {
@@ -325,6 +391,8 @@ export async function buildRoundStatements(env: Env, season: number, windowSeq: 
     pkgJson: string;
   }
   const rows: OfferRow[] = [];
+  // 对赌条款在报价期抽定（v6.84.4）：同一队同一品牌只算一次；条款随报价快照走，签约/转正不再重抽。
+  const betTermsCache = new Map<string, BetTerms>();
   // 招商性格偏好（v6.51.0 批 3）：排在前面的队优先被递价——同一品牌下 prefer 命中数多的队排前，
   // 命中数相同再按估值降序（与 v6.51.0 之前的纯估值序相比，只在有命中差异时换序）。
   const clubSignals = await loadClubSignals(env, season);
@@ -344,6 +412,15 @@ export async function buildRoundStatements(env: Env, season: number, windowSeq: 
       offeredTeams.add(clubId);
       const fee = valuations.find((v) => v.clubId === clubId)!.fee;
       const pkg = buildPackages(params, fee)[pkgNo - 1]!;
+      let betTerms: BetTerms | undefined;
+      if (pkgNo === 3) {
+        const cacheKey = `${clubId}:${b.brand}`;
+        betTerms = betTermsCache.get(cacheKey);
+        if (!betTerms) {
+          betTerms = await buildBetTerms(env, clubId, b.brand, season, windowSeq);
+          betTermsCache.set(cacheKey, betTerms);
+        }
+      }
       rows.push({
         brandId: b.id,
         clubId,
@@ -358,6 +435,7 @@ export async function buildRoundStatements(env: Env, season: number, windowSeq: 
           betAttend: pkg.betAttend,
           betFans: pkg.betFans,
           brandHeat: b.heat,
+          ...(betTerms ? { betTerms } : {}),
         }),
       });
     }
@@ -460,9 +538,13 @@ export async function activateQueuedStatements(
   const activated: QueuedActivation[] = [];
   for (const q of queued) {
     const snap = parsePkgJson(q.package_json, q.package_no, q.amount);
-    // 冠名落点名与对赌条款快照（v6.51.0 批 1/3）：与直接签约同一口径——转正当刻抽签并落库
+    // 冠名落点名与对赌条款快照（v6.51.0 批 1/3；v6.84.4 起条款在报价期抽定）：优先读报价快照，
+    // 旧报价（无 betTerms）才在转正当刻补抽，保证已展示条款到转正不变。
     const venueName = composeVenueName(q.brand, q.stadium_name);
-    const betTerms = q.package_no === 3 ? JSON.stringify(await buildBetTerms(env, q.club_id, q.brand, season, windowSeq)) : '';
+    const betTerms =
+      q.package_no === 3
+        ? JSON.stringify(snap.betTerms ?? (await buildBetTerms(env, q.club_id, q.brand, season, windowSeq)))
+        : '';
     // 构建期仍有 active 的队不进通知列表（语句照生成，执行期守卫决定落不落）
     if (!actives.has(q.club_id)) {
       activated.push({
@@ -521,6 +603,8 @@ interface OfferSnapshot {
   betAttend: number | null;
   betFans: number | null;
   brandHeat: number;
+  /** v6.84.4：报价期抽定的对赌条款快照；null = 旧报价（兼容期签约时补抽） */
+  betTerms: BetTerms | null;
 }
 
 function parsePkgJson(raw: string, packageNo: number, amountFallback: number): OfferSnapshot {
@@ -531,6 +615,7 @@ function parsePkgJson(raw: string, packageNo: number, amountFallback: number): O
     betAttend: null,
     betFans: null,
     brandHeat: 1,
+    betTerms: null,
   };
   try {
     const p = JSON.parse(raw) as Partial<OfferSnapshot> | null;
@@ -542,6 +627,10 @@ function parsePkgJson(raw: string, packageNo: number, amountFallback: number): O
       betAttend: typeof p.betAttend === 'number' && Number.isFinite(p.betAttend) ? p.betAttend : null,
       betFans: typeof p.betFans === 'number' && Number.isFinite(p.betFans) ? p.betFans : null,
       brandHeat: typeof p.brandHeat === 'number' && Number.isFinite(p.brandHeat) ? p.brandHeat : fallback.brandHeat,
+      betTerms:
+        p.betTerms && typeof p.betTerms === 'object' && p.betTerms.v === 2 && Array.isArray(p.betTerms.items)
+          ? p.betTerms
+          : null,
     };
   } catch {
     return fallback;
@@ -738,8 +827,11 @@ export async function acceptOffer(
     .bind(clubId)
     .first<{ name: string }>();
   const venueName = composeVenueName(offer.brand, stadiumRow?.name ?? null);
-  // 对赌条款快照（v6.51.0 批 3）：只在对赌套餐签约时抽签（确定性 seed ⇒ 重放/重跑逐字一致）
-  const betTerms = offer.package_no === 3 ? JSON.stringify(await buildBetTerms(env, clubId, offer.brand, win.season, win.windowSeq)) : '';
+  // 对赌条款快照（v6.51.0 批 3；v6.84.4 起报价期抽定）：优先读报价快照，旧报价才在签约时补抽
+  const betTerms =
+    offer.package_no === 3
+      ? JSON.stringify(snap.betTerms ?? (await buildBetTerms(env, clubId, offer.brand, win.season, win.windowSeq)))
+      : '';
   const contractCols = [
     clubId, offer.brand, snap.brandHeat, snap.baseFee, offer.package_no, snap.pkgName, offer.amount,
     offer.windows, offer.windows, snap.bonusAmount, snap.betAttend, snap.betFans,
@@ -847,6 +939,8 @@ export async function spawnVisitOffer(
   // 套餐按品牌招商性格（v6.51.0 批 3）：稳健/进取/对赌各递自家套餐，未登记回落稳健全（插件 offer_spawn 旧口径）
   const pkgNo = packageNoForBrand(picked.tier, picked.style);
   const pkg = buildPackages(params, fee)[pkgNo - 1] ?? buildPackages(params, fee)[0]!;
+  // 对赌条款在报价期抽定（v6.84.4）：上门报价同样随报价快照走，签约/转正不再重抽。
+  const betTerms = pkgNo === 3 ? await buildBetTerms(env, club.clubId, picked.brand, open.opened_season, open.opened_window) : undefined;
   const expireAt = rules.offerTtlHours > 0 ? new Date(Date.now() + rules.offerTtlHours * 3_600_000).toISOString() : '9999-12-31T00:00:00.000Z';
   const out = await db
     .prepare(
@@ -860,7 +954,7 @@ export async function spawnVisitOffer(
     )
     .bind(
       open.id, picked.id, club.clubId, pkgNo, pkg.feePerWindow, pkg.windows,
-      JSON.stringify({ slot: 'naming', pkgName: pkg.pkgName, baseFee: fee, bonusAmount: pkg.bonusAmount, betAttend: pkg.betAttend, betFans: pkg.betFans, brandHeat: picked.heat }),
+      JSON.stringify({ slot: 'naming', pkgName: pkg.pkgName, baseFee: fee, bonusAmount: pkg.bonusAmount, betAttend: pkg.betAttend, betFans: pkg.betFans, brandHeat: picked.heat, ...(betTerms ? { betTerms } : {}) }),
       expireAt, open.id, picked.id, club.clubId, occurrenceId,
     )
     .run();

@@ -1,8 +1,8 @@
 # 玩家队 → CPU 队反向转换设计
 
-- 日期：2026-11-11（2026-11-12 按高级评审修订）
-- 状态：已实现，本地待上线（v6.84.0；2026-11-12 全量验证 3,273 例通过）
-- 目标版本：v6.84.0（当前 package.json 6.83.0）
+- 日期：2026-11-11（2026-11-13 按生产问题修订）
+- 状态：已实现，v6.84.0 已上线；v6.84.3 本地待上线（负余额清零、CPU 队忠诚支出豁免、队名后缀无空格）
+- 目标版本：v6.84.3（当前 package.json 6.84.3）
 - 口径拍板：保留阵容和合同；默认阻止在途人工状态；不做强制转换；现金与消费券退出流通；转换后 CPU 不入账；`transfer_banned=0`。
 
 ## 1. 背景
@@ -380,6 +380,13 @@ WHERE id = ? AND is_cpu = 0
 - 默认目标集改为 `SELECT id FROM clubs WHERE is_cpu = 0 ORDER BY id`；
 - 显式 `input.clubIds` 先过滤 `is_cpu=1`；全部被过滤时返回 `{ clubs:0, triggered:0 }`，不静默改选其他队；
 - 点名 `eventId` 同样不落到 CPU 队。
+
+`src/worker/season-settle.ts` 的 `loyaltyMovements`：
+
+- 查现行合同时 join `clubs` 并加 `COALESCE(is_cpu,0)=0`；CPU 队合同不产生忠诚支出流水。
+- 关窗批仍调用该函数，但 CPU 队不会被扣款（v6.84.3 补漏；工资与富人税自 v2.0.0 已豁免）。
+
+**队名后缀**：`cpuSuffixName` 与两个改名端点统一生成/归一化 `队名(CPU)`，`(CPU)` 前不留空格。
 
 ## 7. UI 设计
 

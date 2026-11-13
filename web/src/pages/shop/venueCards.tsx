@@ -349,65 +349,82 @@ export function NamingCard() {
 
   const contract = quote.contract;
 
-  // 报价行（v6.14.0 C3）：待签可接受；已登记接班只展示；有现约时接受要先选「到期接替」或「解约换签」
+  // 报价卡（v6.14.0 C3；v6.84.4 卡片化）：头部品牌/档位、价格块、条款块、底部操作区分离。
+  // 待签可接受；已登记接班只展示；有现约时接受要先选「到期接替」或「解约换签」
   function offerRow(o: ClubOffer) {
     const hqText = brandHqText(o.brandProfile, o.industry);
     return (
-      <p key={o.id}>
-        <b>{o.brand}</b>
-        {o.brandProfile !== null && <BrandTags profile={o.brandProfile} />}
-        <span className={`badge ${TIER_BADGE[o.tier] ?? 'gray'}`} style={{ marginLeft: 6 }} title={TIER_PERK[o.tier] ?? ''}>
-          {o.tier}档
-        </span>
-        {o.status === 'queued' && (
-          <span className="badge sky" style={{ marginLeft: 6 }}>
-            待接替
+      <article className="naming-offer" key={o.id}>
+        <div className="naming-offer-head">
+          <div className="naming-offer-brand">
+            <b>{o.brand}</b>
+            {o.brandProfile !== null && <BrandTags profile={o.brandProfile} />}
+          </div>
+          <span className={`badge ${TIER_BADGE[o.tier] ?? 'gray'}`} title={TIER_PERK[o.tier] ?? ''}>
+            {o.tier}档
           </span>
-        )}
-        {hqText !== '' && <span className="hint">（{hqText}）</span>}
-        <span className="hint">（套餐 {o.packageNo}）</span> <span className="mono">{o.amount.toFixed(2)}</span> M/窗 ×{' '}
-        <span className="mono">{seasonsOf(o.windows)}</span> 赛季
-        <span className="hint">
-          {' '}
-          ·{' '}
-          {o.expireAt.startsWith('9999')
-            ? '本轮内有效'
-            : `有效期至 ${dateTime(o.expireAt)}`}
-        </span>
-        {o.venueName !== '' && (
-          <span className="hint"> · 签下将命名为「{o.venueName}」</span>
-        )}
+          {o.status === 'queued' && <span className="badge sky">待接替</span>}
+        </div>
+        <div className="naming-offer-sub">
+          套餐 {o.packageNo}
+          {hqText !== '' && <> · {hqText}</>}
+        </div>
+        <div className="naming-offer-price">
+          <span className="mono">{o.amount.toFixed(2)}</span> M/窗 × <span className="mono">{seasonsOf(o.windows)}</span> 赛季
+        </div>
+        <div className="naming-offer-meta">
+          <span>{o.expireAt.startsWith('9999') ? '本轮内有效' : `有效期至 ${dateTime(o.expireAt)}`}</span>
+          {o.venueName !== '' && <span>签下将命名为「{o.venueName}」</span>}
+        </div>
         {o.packageNo === 3 && (
-          <span className="hint">
-            {' '}
-            · 对赌：签约时随机抽 2 条指标，每项达线各得 0.25 × 底价奖金
-            {o.brandProfile?.prefer ? `（偏向 ${o.brandProfile.prefer.split(',').join('、')}）` : ''}
-          </span>
+          <div className="naming-offer-terms">
+            <b>对赌条款</b>
+            {o.betTerms && o.betTerms.items.length > 0 ? (
+              <div className="naming-offer-terms-list">
+                {o.betTerms.items.map((it) => (
+                  <span key={it.m}>
+                    {BET_LABEL[it.m] ?? it.m} 达{' '}
+                    <span className="mono" title={`基线 ${betThresholdText(it.m, it.baseline)}（样本 ${it.nBase} 场，目标概率 ${(it.pTarget * 100).toFixed(0)}%）`}>
+                      {betThresholdText(it.m, it.threshold)}
+                    </span>
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <div className="hint">存量报价：签约确认时抽定条款</div>
+            )}
+            <div className="hint">
+              每项达线各得 0.25 × 底价奖金
+              {o.brandProfile?.prefer ? `（偏向 ${o.brandProfile.prefer.split(',').join('、')}）` : ''}
+            </div>
+          </div>
         )}
-        {o.status === 'queued' ? null : contract ? (
-          pickId === o.id ? (
-            <>
-              <button className="btn btn-ghost btn-sm" type="button" disabled={busy} style={{ marginLeft: 8 }} onClick={() => void accept(o, 'queued')}>
-                现合同到期后自动接替
+        <div className="naming-offer-actions">
+          {o.status === 'queued' ? null : contract ? (
+            pickId === o.id ? (
+              <>
+                <button className="btn btn-ghost btn-sm" type="button" disabled={busy} onClick={() => void accept(o, 'queued')}>
+                  现合同到期后自动接替
+                </button>
+                <button className="btn btn-sm" type="button" disabled={busy} onClick={() => void accept(o, 'terminate')}>
+                  解约当前并签新
+                </button>
+                <button className="btn btn-ghost btn-sm" type="button" disabled={busy} onClick={() => setPickId(null)}>
+                  取消
+                </button>
+              </>
+            ) : (
+              <button className="btn btn-sm" type="button" disabled={busy} onClick={() => setPickId(o.id)}>
+                接受
               </button>
-              <button className="btn btn-sm" type="button" disabled={busy} style={{ marginLeft: 6 }} onClick={() => void accept(o, 'terminate')}>
-                解约当前并签新
-              </button>
-              <button className="btn btn-ghost btn-sm" type="button" disabled={busy} style={{ marginLeft: 6 }} onClick={() => setPickId(null)}>
-                取消
-              </button>
-            </>
+            )
           ) : (
-            <button className="btn btn-sm" type="button" disabled={busy} style={{ marginLeft: 8 }} onClick={() => setPickId(o.id)}>
-              接受
+            <button className="btn btn-sm" type="button" disabled={busy} onClick={() => void accept(o)}>
+              接受签约
             </button>
-          )
-        ) : (
-          <button className="btn btn-sm" type="button" disabled={busy} style={{ marginLeft: 8 }} onClick={() => void accept(o)}>
-            接受签约
-          </button>
-        )}
-      </p>
+          )}
+        </div>
+      </article>
     );
   }
 
@@ -437,7 +454,7 @@ export function NamingCard() {
                     </span>
                   </span>
                 ))}
-                <span className="hint">（签约时按品牌偏好抽定，合同期内不重抽）</span>
+                <span className="hint">（报价期按品牌偏好抽定，合同期内不重抽）</span>
               </>
             ) : (
               contract.bonusAmount > 0 && (
@@ -508,7 +525,7 @@ export function NamingCard() {
             <b>收到的报价</b>
             <span className="hint">（有生效冠名：接受时选「到期后自动接替」或「解约当前并签新」）</span>
           </p>
-          {quote.offers.length === 0 ? <p className="hint">暂无待签报价。</p> : quote.offers.map(offerRow)}
+          {quote.offers.length === 0 ? <p className="hint">暂无待签报价。</p> : <div className="naming-offers">{quote.offers.map(offerRow)}</div>}
           <button className="btn btn-sm" type="button" disabled={busy} onClick={() => void terminate()}>
             退冠名
           </button>
@@ -521,7 +538,7 @@ export function NamingCard() {
           {quote.offers.length === 0 ? (
             <p className="hint">暂无待签报价——等下一次关窗后品牌递价，或抽到「品牌上门」事件。</p>
           ) : (
-            quote.offers.map(offerRow)
+            <div className="naming-offers">{quote.offers.map(offerRow)}</div>
           )}
         </>
       )}
