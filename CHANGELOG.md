@@ -4,7 +4,7 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
-## [v6.84.2] · 冠名市场与消费中心时段解耦、站内信落点修正（2026-11-13，本地完成，未上线）
+## [v6.84.2] · 冠名市场与消费中心时段解耦、站内信落点修正（2026-11-13，已上线 Version ac58a768）
 
 **Fixed**
 
@@ -17,6 +17,7 @@
 - `tests/naming-ops.test.ts` 新增「消费中心时段关闭不影响冠名签约/续约/退约」：先把 `consumption` 设为已结束并断言 409，再完成签约、续约、退约。
 - `web/src/lib/notify-links.test.ts` 更新冠名落点断言（带/不带 clubId 都回 `/shop?tab=venue`）。
 - `npm run typecheck` 三份清；`npm test` **213 文件 / 3,276 例**全绿；`npm run build` 4.22s 通过。
+- push `6f9f7ec..ee005d2` 触发 CF Workers Builds 自动部署 Version `ac58a768-bf4e-4db5-8142-52ab06d48f02` @2026-11-13T04:33:36Z（100%）；线上 `/api/health` 200、入口 `assets/index-H24efdpT.js` 版本串 `6.84.2`、`/shop?tab=venue` 200、`/api/admin/clubs/2/to-cpu` 匿名 401。
 
 ## [v6.84.1] · 转 CPU 预检：已生效合同诉求不再阻断（2026-11-13，已上线 Version 1c5b247f）
 
