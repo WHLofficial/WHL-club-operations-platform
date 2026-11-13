@@ -4,6 +4,17 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.84.1] · 转 CPU 预检：已生效合同诉求不再阻断（2026-11-13）
+
+**Fixed**
+
+- `contract_demands` 阻断条件从 `status IN ('pending','countered','accepted')` 改为 `status IN ('pending','countered') OR (status='accepted' AND applied_at IS NULL)`。关窗批生效后 acceptance 仍保留 `status='accepted'`、只落 `applied_at`，旧条件会让已生效诉求永久挡住转 CPU。
+- 新增用例：accepted 未生效时阻断；写入 `applied_at` 后不再阻断。
+
+**Verification**
+
+- `tests/cpu-detach.test.ts` 29/29；`npm run typecheck` 三份清；`npm test` **213 文件 / 3,274 例**全绿；`npm run build` 4.92s 通过。
+
 ## [v6.84.0] · 玩家队 → CPU 队反向转换（2026-11-12，已上线 Version 87949e3b）
 
 **Added**

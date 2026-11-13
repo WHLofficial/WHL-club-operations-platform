@@ -764,7 +764,7 @@ const CPU_DETACH_CHECKS: DetachCheck[] = [
     label: '未决合同诉求',
     detail: (n) => `${n} 条球员合同诉求未终结（待回应/已还价/待签）`,
     countSql: (id) => ({
-      sql: `SELECT COUNT(*) FROM contract_demands WHERE club_id = ? AND status IN ('pending', 'countered', 'accepted')`,
+      sql: `SELECT COUNT(*) FROM contract_demands WHERE club_id = ? AND (status IN ('pending', 'countered') OR (status = 'accepted' AND applied_at IS NULL))`,
       params: [id],
     }),
   },

@@ -184,6 +184,27 @@ describe('GET /clubs/:id/to-cpu 预检', () => {
     expect(body.ready).toBe(false);
   });
 
+  it('已生效的 accepted 诉求不再阻断；未生效的 accepted 仍阻断', async () => {
+    const fx = freshEnv();
+    seedClub(fx, 20, '待转队');
+    fx.sqlite.prepare("INSERT INTO players (id, uid, name, club_id) VALUES (1, 'p1', '球员甲', 20)").run();
+    fx.sqlite
+      .prepare(
+        `INSERT INTO contract_demands
+          (id, player_id, club_id, season, window_seq, status, current_wage, expected_wage,
+           target_wage, floor_wage, raise_pct, rc_current, rc_floor, rc_fee, round, expires_at, seed, applied_at)
+         VALUES (1, 1, 20, 9, 2, 'accepted', 1, 2, 2, 1.5, 0.5, 0, 0, 0, 0, '2026-11-30T00:00:00Z', 1, NULL)`,
+      )
+      .run();
+
+    let body = (await (await get('/api/admin/clubs/20/to-cpu', fx.env)).json()) as CpuDetachState;
+    expect(body.blockers.map((b) => b.key)).toContain('contract_demand');
+
+    fx.sqlite.prepare("UPDATE contract_demands SET applied_at = '2026-11-20T00:00:00Z' WHERE id = 1").run();
+    body = (await (await get('/api/admin/clubs/20/to-cpu', fx.env)).json()) as CpuDetachState;
+    expect(body.blockers.map((b) => b.key)).not.toContain('contract_demand');
+  });
+
   it('绑定与未使用码从 auth 库读；未使用码只进 warning', async () => {
     const fx = freshEnv();
     seedClub(fx, 10, '蓝月亮');

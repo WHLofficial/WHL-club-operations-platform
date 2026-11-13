@@ -85,7 +85,7 @@
 - 该队作为买方或卖方的 `offers.status IN ('pending','intent')`；
 - 该队相关的 `transfers.status='pending_review'`；
 - 该队相关的历史 `transfers.status='signing'`（旧流程残留、语义仍在途）；
-- 该队 `contract_demands.status IN ('pending','countered','accepted')`；
+- 该队存在未生效的球员合同诉求：`status IN ('pending','countered') OR (status='accepted' AND applied_at IS NULL)`；已生效（`applied_at` 落值）的 accepted 诉求不再阻断；
 - 该队仍有 `fund_holds.status='held'`；
 - 关联的 open `review_tasks`；
 - 该队有 `event_occurrences.status='pending'` 的随机事件；
@@ -325,7 +325,7 @@ WHERE id = ? AND is_cpu = 0
       AND o.status IN ('pending','intent')
   )
   AND NOT EXISTS (SELECT 1 FROM transfers t WHERE (t.from_club_id = ? OR t.to_club_id = ?) AND t.status IN ('pending_review','signing'))
-  AND NOT EXISTS (SELECT 1 FROM contract_demands d WHERE d.club_id = ? AND d.status IN ('pending','countered','accepted'))
+  AND NOT EXISTS (SELECT 1 FROM contract_demands d WHERE d.club_id = ? AND (d.status IN ('pending','countered') OR (d.status = 'accepted' AND d.applied_at IS NULL)))
   AND NOT EXISTS (SELECT 1 FROM fund_holds f WHERE f.club_id = ? AND f.status = 'held')
   AND NOT EXISTS (SELECT 1 FROM event_occurrences e WHERE e.club_id = ? AND e.status = 'pending')
   AND NOT EXISTS (SELECT 1 FROM shop_orders o2 WHERE o2.club_id = ? AND o2.status = 'pending')
