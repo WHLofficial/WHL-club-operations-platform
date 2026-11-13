@@ -1472,22 +1472,35 @@ function namingContractDto(
 // status 产出点按契约收窄字面：listClubOffers 的 WHERE 恒只取
 // `(status='pending' AND round open) OR status='queued'`（market-ops.ts:119），行类型标宽是
 // D1 泛型的保守写法，这里断言不改变任何运行时行为。
-function offerBetTerms(raw: string): ReturnType<typeof parseBetTerms> {
+// 报价行的 package_json 快照（v6.84.4/6.84.5）：对赌条款 + 套餐名/底价一次解析。
+// 存量旧行字段缺失时退化为 null/0，前端用套餐序号兜底，不改变签约语义。
+function offerSnapshot(raw: string): {
+  betTerms: ReturnType<typeof parseBetTerms>;
+  pkgName: string;
+  baseFee: number;
+} {
   try {
-    const p = JSON.parse(raw) as { betTerms?: unknown } | null;
-    return parseBetTerms(p && typeof p === 'object' && p.betTerms ? JSON.stringify(p.betTerms) : '');
+    const p = JSON.parse(raw) as { betTerms?: unknown; pkgName?: unknown; baseFee?: unknown } | null;
+    return {
+      betTerms: parseBetTerms(p && typeof p === 'object' && p.betTerms ? JSON.stringify(p.betTerms) : ''),
+      pkgName: p && typeof p.pkgName === 'string' ? p.pkgName : '',
+      baseFee: p && typeof p.baseFee === 'number' && Number.isFinite(p.baseFee) ? p.baseFee : 0,
+    };
   } catch {
-    return null;
+    return { betTerms: null, pkgName: '', baseFee: 0 };
   }
 }
 
 function offerDto(row: Awaited<ReturnType<typeof listClubOffers>>[number]): ClubOffer {
+  const snap = offerSnapshot(row.package_json);
   return {
     id: row.id,
     brand: row.brand,
     tier: row.tier,
     industry: row.industry,
     packageNo: row.package_no,
+    pkgName: snap.pkgName,
+    baseFee: snap.baseFee,
     amount: row.amount,
     windows: row.windows,
     status: row.status as 'pending' | 'queued',
@@ -1495,7 +1508,7 @@ function offerDto(row: Awaited<ReturnType<typeof listClubOffers>>[number]): Club
     // v6.51.0 批 1：签下将命名为「品牌·球场名」（无球场名时空串，前端不加行）
     venueName: composeVenueName(row.brand, row.stadium_name),
     // v6.84.4：报价期抽定的对赌条款；存量旧报价为 null（前端回落到签约时抽定文案）
-    betTerms: offerBetTerms(row.package_json),
+    betTerms: snap.betTerms,
     brandProfile: brandProfileDto({
       name_en: row.name_en,
       color: row.color,

@@ -262,10 +262,25 @@ export function NamingCard() {
   // 档位徽标配色（v6.13.0 C2）：头部紫 / 新兴天蓝 / 口碑灰
   const TIER_BADGE: Record<string, string> = { 头部: 'purple', 新兴: 'sky', 口碑: 'gray' };
   const TIER_PERK: Record<string, string> = {
-    头部: '头部档：情绪地板 0.70，敏感（负向 ×1.5），活动收入 +2%',
-    新兴: '新兴档：情绪地板 0.60，性格标准，无加成',
-    口碑: '口碑档：情绪地板 0.50，宽容（负向 ×0.75），死忠涨粉 +0.5%',
+    头部: '头部企业：情绪地板 0.70，敏感（负向 ×1.5），活动收入 +2%',
+    新兴: '新兴企业：情绪地板 0.60，性格标准，无加成',
+    口碑: '口碑企业：情绪地板 0.50，宽容（负向 ×0.75），死忠涨粉 +0.5%',
   };
+
+  // 套餐显示名（v6.84.5）：不再暴露内部序号；旧数据缺 pkgName 时兜底。
+  function pkgLabel(o: Pick<ClubOffer, 'pkgName' | 'packageNo'>): string {
+    return o.pkgName !== '' ? `${o.pkgName}套餐` : `套餐 ${o.packageNo}`;
+  }
+
+  // 对赌奖金文案（v6.84.5）：与 naming-ops.ts:1116 同口径，按底价现算；金额两位小数。
+  function betBonusText(baseFee: number, windows: number): string {
+    const rate = Math.min(0.25, 1 / Math.max(1, windows));
+    const pct = Math.round(rate * 1000) / 10;
+    if (!(baseFee > 0)) return `每项达线得额外${pct}%奖金`;
+    const perItem = Math.round(baseFee * rate * 1000) / 1000;
+    const money = (Math.round(perItem * 100) / 100).toFixed(2);
+    return `每项达线得额外${pct}%奖金（约${money}M）`;
+  }
 
   // 接报价（v6.14.0 C3）：无现约不带 mode 直接签；有现约必选 queued（到期接替）/ terminate（解约换签）
   async function accept(offer: ClubOffer, mode?: 'queued' | 'terminate') {
@@ -290,7 +305,7 @@ export function NamingCard() {
       } else {
         const c = out.contract;
         show(
-          `已签下 ${c?.brand ?? offer.brand}（${c?.pkgName ?? `套餐 ${offer.packageNo}`}）：每窗 ${(c?.feePerWindow ?? offer.amount).toFixed(2)}M × ${seasonsOf(c?.windowsTotal ?? offer.windows)} 赛季，常规窗关窗入账。`,
+          `已签下 ${c?.brand ?? offer.brand}（${c?.pkgName || pkgLabel(offer)}）：每窗 ${(c?.feePerWindow ?? offer.amount).toFixed(2)}M × ${seasonsOf(c?.windowsTotal ?? offer.windows)} 赛季，常规窗关窗入账。`,
         );
       }
     } catch (err) {
@@ -361,12 +376,12 @@ export function NamingCard() {
             {o.brandProfile !== null && <BrandTags profile={o.brandProfile} />}
           </div>
           <span className={`badge ${TIER_BADGE[o.tier] ?? 'gray'}`} title={TIER_PERK[o.tier] ?? ''}>
-            {o.tier}档
+            {o.tier}企业
           </span>
           {o.status === 'queued' && <span className="badge sky">待接替</span>}
         </div>
         <div className="naming-offer-sub">
-          套餐 {o.packageNo}
+          {pkgLabel(o)}
           {hqText !== '' && <> · {hqText}</>}
         </div>
         <div className="naming-offer-price">
@@ -393,10 +408,7 @@ export function NamingCard() {
             ) : (
               <div className="hint">存量报价：签约确认时抽定条款</div>
             )}
-            <div className="hint">
-              每项达线各得 0.25 × 底价奖金
-              {o.brandProfile?.prefer ? `（偏向 ${o.brandProfile.prefer.split(',').join('、')}）` : ''}
-            </div>
+            <div className="hint">{betBonusText(o.baseFee, o.windows)}</div>
           </div>
         )}
         <div className="naming-offer-actions">
@@ -437,15 +449,15 @@ export function NamingCard() {
             现约 <b>{contract.venueName || contract.brand}</b>
             {contract.brandProfile !== null && <BrandTags profile={contract.brandProfile} />}
             <span className={`badge ${TIER_BADGE[contract.tier] ?? 'gray'}`} style={{ marginLeft: 6 }} title={TIER_PERK[contract.tier] ?? ''}>
-              {contract.tier}档
+              {contract.tier}企业
             </span>
-            （{contract.pkgName}套餐）：每窗{' '}
+            （{pkgLabel(contract)}）：每窗{' '}
             <span className="mono">{contract.feePerWindow.toFixed(2)}</span> M，还剩{' '}
             <span className="mono">{seasonsOf(contract.windowsRemaining)}</span>/
             <span className="mono">{seasonsOf(contract.windowsTotal)}</span> 赛季
             {contract.betTerms && contract.betTerms.items.length > 0 ? (
               <>
-                {' '}· 对赌条款（每项达线 <span className="mono">0.25</span> × 底价）：{' '}
+                {' '}· 对赌条款：{' '}
                 {contract.betTerms.items.map((it, i) => (
                   <span key={it.m}>
                     {i > 0 && '、'}
@@ -454,7 +466,7 @@ export function NamingCard() {
                     </span>
                   </span>
                 ))}
-                <span className="hint">（报价期按品牌偏好抽定，合同期内不重抽）</span>
+                <span className="hint">（{betBonusText(contract.baseFee, contract.windowsTotal)}；报价期已抽定，合同期内不重抽）</span>
               </>
             ) : (
               contract.bonusAmount > 0 && (

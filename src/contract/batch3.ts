@@ -375,6 +375,10 @@ export interface ClubOffer {
   /** 行业（v6.51.0 批 2）：报价卡属地行「城市 · 行业」用 */
   industry: string;
   packageNo: number;
+  /** 套餐名（v6.84.5）：稳健 / 进取 / 对赌；直接展示，不用内部序号 */
+  pkgName: string;
+  /** 套餐底价（v6.84.5）：对赌奖金按底价计算，前端展示实际金额用 */
+  baseFee: number;
   amount: number;
   windows: number;
   status: 'pending' | 'queued';

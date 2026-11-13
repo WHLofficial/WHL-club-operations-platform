@@ -249,6 +249,8 @@ describe('v6.84.4 冠名报价卡', () => {
     tier: '新兴',
     industry: '零售',
     packageNo: 3,
+    pkgName: '对赌',
+    baseFee: 3.57,
     amount: 2.5,
     windows: 4,
     status: 'pending',
@@ -263,6 +265,15 @@ describe('v6.84.4 冠名报价卡', () => {
     expect(screen.getByText(/上座率 达/)).toBeTruthy();
     expect(screen.getByText(/死忠增长 达/)).toBeTruthy();
     expect(screen.queryByText(/签约时随机抽/)).toBeNull();
+  });
+
+  it('套餐显示名称不显示内部序号，档位称企业，奖金按底价算金额', async () => {
+    renderNaming({ offers: [{ ...baseOffer, betTerms }] });
+    expect(await screen.findByText(/对赌套餐/)).toBeTruthy();
+    expect(screen.getByText('新兴企业')).toBeTruthy();
+    expect(screen.getByText('每项达线得额外25%奖金（约0.89M）')).toBeTruthy();
+    expect(screen.queryByText(/套餐 3/)).toBeNull();
+    expect(screen.queryByText(/偏向/)).toBeNull();
   });
 
   it('存量旧报价：显示「签约确认时抽定条款」', async () => {

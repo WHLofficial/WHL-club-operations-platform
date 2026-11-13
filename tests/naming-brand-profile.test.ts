@@ -310,9 +310,10 @@ describe('落点名（v6.51.0 批 1）：写入与读侧', () => {
     const { seedOffer } = await import('./market-helpers.ts');
     await seedOffer(fx.env, 1, '比特兰科技', 3); // style='对赌'、prefer='冠军相,大场馆'
     const quote = await getAs('/api/club/naming/quote', fx.env, 'whl_session=tok-coach');
-    const offers = ((await quote.json()) as { offers: { brand: string; venueName: string; packageNo: number; brandProfile: { hq: string; style: string; slogan: string } | null }[] }).offers;
+    const offers = ((await quote.json()) as { offers: { brand: string; venueName: string; packageNo: number; pkgName: string; baseFee: number; brandProfile: { hq: string; style: string; slogan: string } | null }[] }).offers;
     expect(offers).toHaveLength(1);
-    expect(offers[0]).toMatchObject({ brand: '比特兰科技', venueName: '比特兰科技·糖果盒', packageNo: 3 });
+    expect(offers[0]).toMatchObject({ brand: '比特兰科技', venueName: '比特兰科技·糖果盒', packageNo: 3, pkgName: '对赌' });
+    expect(offers[0]!.baseFee).toBeGreaterThan(0);
     expect(offers[0]!.brandProfile).toMatchObject({ hq: '塔林', style: '对赌' });
     expect(offers[0]!.brandProfile!.slogan.length).toBeGreaterThan(0);
   });

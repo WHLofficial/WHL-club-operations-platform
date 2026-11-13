@@ -4,6 +4,19 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.84.5] · 冠名卡文案：套餐名、企业档、奖金金额（2026-11-13，本地完成）
+
+**Changed**
+
+- 报价卡不再显示内部套餐序号（`套餐 3`），改显示 `pkgName`：`稳健套餐` / `进取套餐` / `对赌套餐`；`ClubOffer` 与 `offerDto` 增加 `pkgName`、`baseFee`，从 `market_offers.package_json` 读取；旧数据缺字段时回落到 `套餐 N`。
+- 品牌档位文案由 `头部档 / 新兴档 / 口碑档` 改为 `头部企业 / 新兴企业 / 口碑企业`（报价卡、现约、tooltip 同步）。
+- 删除报价卡上的 `（偏向 高上座、死忠规模）` 品牌偏好说明；合同区说明改为「报价期已抽定，合同期内不重抽」。
+- 对赌奖金按底价算出现金额：`每项达线得额外 25% 奖金（约 0.26M）`；报价卡与现约同口径，百分比按 `min(0.25, 1/windows)` 计算，金额两位小数。`naming_contracts.bonus_amount` 仍是旧口径总额字段，v2 对赌结算不使用。
+
+**Verification**
+
+- `web/src/pages/shop/venueCards.test.tsx` 9/9；`tests/market-rounds.test.ts` 76/76、`tests/naming-brand-profile.test.ts` 11/11；typecheck 三份清；`npm test` **213 文件 / 3,284 例**全绿；`npm run build` 4.42s 通过。
+
 ## [v6.84.4] · 冠名报价卡片化、对赌条款报价期抽定（2026-11-13，已上线）
 
 **上线**：push `ee005d2..492624d`，CF Workers Builds 自动部署 Version `6cdf293c-8c52-4eea-82da-3040eb452d12` @2026-11-13T12:28:34Z；线上 `/api/health` 200、入口 `assets/index-CNK-FZzb.js` 版本串 6.84.4。存量 21 条对赌报价已一次性补写 `betTerms`（逐条核对 0 mismatch，审计 21 条，剩余无条款 0 条）。
