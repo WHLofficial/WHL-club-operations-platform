@@ -4,7 +4,7 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
-## [v6.84.1] · 转 CPU 预检：已生效合同诉求不再阻断（2026-11-13）
+## [v6.84.1] · 转 CPU 预检：已生效合同诉求不再阻断（2026-11-13，已上线 Version 1c5b247f）
 
 **Fixed**
 
@@ -14,6 +14,7 @@
 **Verification**
 
 - `tests/cpu-detach.test.ts` 29/29；`npm run typecheck` 三份清；`npm test` **213 文件 / 3,274 例**全绿；`npm run build` 4.92s 通过。
+- push `46f1dc7..01221b5` 触发 CF Workers Builds 自动部署 Version `1c5b247f-4aa2-4bad-aba5-a36cae11a383` @2026-11-13T02:28:42Z（100%）；线上 `/api/health` 200、`/api/admin/clubs/2/to-cpu` 匿名 401、入口 `assets/index-C_IlX7Ma.js` 版本串 `6.84.1`。
 
 ## [v6.84.0] · 玩家队 → CPU 队反向转换（2026-11-12，已上线 Version 87949e3b）
 
