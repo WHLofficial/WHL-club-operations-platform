@@ -12,6 +12,7 @@ import {
 } from '../src/worker/naming-ops.ts';
 import { signViaOffer, seedOffer } from './market-helpers.ts';
 import { acceptOffer } from '../src/worker/market-ops.ts';
+import { assertOpOpen } from '../src/worker/ops-schedule.ts';
 import type { NamingParams, HeatRules, BrandPoolRow } from '../src/worker/naming-ops.ts';
 
 interface Fixture {
@@ -210,6 +211,27 @@ describe('签约与解约', () => {
     fx.sqlite.exec("UPDATE naming_contracts SET status = 'terminated', windows_remaining = 0 WHERE club_id = 1");
     fx.sqlite.exec("UPDATE season_windows SET status = 'closed' WHERE season = 1 AND window_seq = 1");
     await expect(signViaOffer(fx.env, 1, '洛森餐饮', 1)).rejects.toMatchObject({ status: 409, message: expect.stringContaining('窗口没开') });
+  });
+
+  it('消费中心时段关闭不影响冠名签约/续约/退约（v6.84.2）', async () => {
+    const fx = freshEnv();
+    seedClub(fx.sqlite);
+    fx.sqlite.exec(`
+      UPDATE ops_schedule
+      SET start_anchor = 'absolute', start_at = '2026-01-01T00:00:00Z',
+          end_anchor = 'absolute', end_at = '2026-01-02T00:00:00Z'
+      WHERE op_key = 'consumption'
+    `);
+    await expect(assertOpOpen(fx.env.DB, 'consumption')).rejects.toMatchObject({ status: 409 });
+
+    const signed = await signViaOffer(fx.env, 1, '奥维恩', 1);
+    expect(signed.status).toBe('active');
+
+    fx.sqlite.exec('UPDATE naming_contracts SET windows_remaining = 1 WHERE club_id = 1');
+    await expect(renewNaming(fx.env, 1, 2, 1)).resolves.toMatchObject({ club_id: 1, package_no: 2 });
+
+    const out = await terminateNaming(fx.env, 1, 1);
+    expect(out.windowsRemaining).toBeGreaterThan(0);
   });
 
   it('闸：弃用品牌签约 400（品牌池 status 过滤，不只看名字存在）', async () => {

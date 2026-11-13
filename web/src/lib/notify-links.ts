@@ -73,7 +73,7 @@ export function notificationLink(item: NotifyLinkItem): string | null {
     case 'window':
       return clubId !== null ? `/clubs/${clubId}?tab=desk` : null;
     case 'naming':
-      // 冠名页签对访客不可见时由俱乐部页自己退回默认页签
-      return clubId !== null ? `/clubs/${clubId}?tab=venue` : null;
+      // 冠名市场在消费中心的「球场与冠名」页签，不在俱乐部只读场馆页
+      return '/shop?tab=venue';
   }
 }

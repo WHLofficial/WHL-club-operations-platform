@@ -4,6 +4,20 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.84.2] · 冠名市场与消费中心时段解耦、站内信落点修正（2026-11-13，本地完成，未上线）
+
+**Fixed**
+
+- 冠名签约/续约/退约不再受 `ops_schedule.consumption` 时段约束：删除 `market-ops.ts` 接报价、`naming-ops.ts` 续约/退约三处 `assertOpOpen('consumption')`，只保留转会窗口闸。消费中心结束后冠名市场仍可正常签约、续约、退约。
+- `NamingCard` 不再读取 `consumption` 运营时段、不再显示该时段提示，按钮只受提交中与窗口闸约束；`ShopPage` 的球场与冠名页签不再显示全局消费中心结束提示（设施经营卡片仍按自身时段提示）。
+- 冠名类站内信统一落到消费中心「球场与冠名」页签：`web/src/lib/notify-links.ts` 的 `naming` 类目从 `/clubs/:id?tab=venue` 改为 `/shop?tab=venue`；`naming_mood`/`naming_terminated`/`naming_champion`/`naming_offer`/`naming_offer_activated` 五个模板同步。
+
+**Verification**
+
+- `tests/naming-ops.test.ts` 新增「消费中心时段关闭不影响冠名签约/续约/退约」：先把 `consumption` 设为已结束并断言 409，再完成签约、续约、退约。
+- `web/src/lib/notify-links.test.ts` 更新冠名落点断言（带/不带 clubId 都回 `/shop?tab=venue`）。
+- `npm run typecheck` 三份清；`npm test` **213 文件 / 3,276 例**全绿；`npm run build` 4.22s 通过。
+
 ## [v6.84.1] · 转 CPU 预检：已生效合同诉求不再阻断（2026-11-13，已上线 Version 1c5b247f）
 
 **Fixed**

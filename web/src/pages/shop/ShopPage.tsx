@@ -106,7 +106,7 @@ function ShopContent({
   // 关窗期后端拒绝消费工单；数据未到按未开窗处理（与球员页 windowOpen 同口径）
   const seasons = useSeasonsCurrent();
   const windowOpen = seasons.data?.window?.status === 'open';
-  // v6.49.0：消费中心整体时段（consumption 键）——与窗口闸叠加，任一不过都点不动
+  // v6.49.0：消费中心时段（consumption 键）——设施/商品与窗口闸叠加；v6.84.2 冠名市场已解耦，venue 页签不再受它约束
   const consumptionGate = useOpsGate('consumption');
   const opsOpen = consumptionGate?.blocked !== true;
   // v6.59.0：队壳只在赛季第 1 窗开放（后端同口径 409 shell_first_window）
@@ -158,7 +158,7 @@ function ShopContent({
               {WINDOW_CLOSED_NOTE}
             </p>
           )}
-          <OpsGateNote gate={consumptionGate} className="hint" />
+          {tab !== 'venue' && <OpsGateNote gate={consumptionGate} className="hint" />}
           {tab === 'venue' ? (
             // 设施/冠名自成一页签，不依赖商品目录的加载态（catalog 只服务另外五类商品）
             <>

@@ -252,9 +252,6 @@ function moodLabel(satisfaction: number): string {
 
 export function NamingCard() {
   const { show } = useToast();
-  // v6.49.0：冠名接报价/续约/终止同属消费中心时段
-  const consumptionGate = useOpsGate('consumption');
-  const opsBlocked = consumptionGate?.blocked === true;
   const { dateTime } = useTimeFmt();
   const quoteQuery = useNamingQuote();
   const refresh = useNamingInvalidation();
@@ -390,10 +387,10 @@ export function NamingCard() {
         {o.status === 'queued' ? null : contract ? (
           pickId === o.id ? (
             <>
-              <button className="btn btn-ghost btn-sm" type="button" disabled={busy || opsBlocked} style={{ marginLeft: 8 }} onClick={() => void accept(o, 'queued')}>
+              <button className="btn btn-ghost btn-sm" type="button" disabled={busy} style={{ marginLeft: 8 }} onClick={() => void accept(o, 'queued')}>
                 现合同到期后自动接替
               </button>
-              <button className="btn btn-sm" type="button" disabled={busy || opsBlocked} style={{ marginLeft: 6 }} onClick={() => void accept(o, 'terminate')}>
+              <button className="btn btn-sm" type="button" disabled={busy} style={{ marginLeft: 6 }} onClick={() => void accept(o, 'terminate')}>
                 解约当前并签新
               </button>
               <button className="btn btn-ghost btn-sm" type="button" disabled={busy} style={{ marginLeft: 6 }} onClick={() => setPickId(null)}>
@@ -406,7 +403,7 @@ export function NamingCard() {
             </button>
           )
         ) : (
-          <button className="btn btn-sm" type="button" disabled={busy || opsBlocked} style={{ marginLeft: 8 }} onClick={() => void accept(o)}>
+          <button className="btn btn-sm" type="button" disabled={busy} style={{ marginLeft: 8 }} onClick={() => void accept(o)}>
             接受签约
           </button>
         )}
@@ -417,7 +414,6 @@ export function NamingCard() {
   return (
     <section className="card">
       <h3>冠名市场</h3>
-      <OpsGateNote gate={consumptionGate} className="hint" />
       {contract ? (
         <>
           <p>
@@ -494,7 +490,7 @@ export function NamingCard() {
                     <button
                       className="btn btn-ghost btn-sm"
                       type="button"
-                      disabled={busy || opsBlocked}
+                      disabled={busy}
                       title={`${seasonsOf(p.windows)} 赛季 × ${p.feePerWindow.toFixed(2)}M/窗${p.bonusAmount > 0 ? `，达线奖金 ${p.bonusAmount.toFixed(2)}M` : ''}`}
                       onClick={() => void renew(p.packageNo, p.pkgName)}
                     >
@@ -513,7 +509,7 @@ export function NamingCard() {
             <span className="hint">（有生效冠名：接受时选「到期后自动接替」或「解约当前并签新」）</span>
           </p>
           {quote.offers.length === 0 ? <p className="hint">暂无待签报价。</p> : quote.offers.map(offerRow)}
-          <button className="btn btn-sm" type="button" disabled={busy || opsBlocked} onClick={() => void terminate()}>
+          <button className="btn btn-sm" type="button" disabled={busy} onClick={() => void terminate()}>
             退冠名
           </button>
         </>

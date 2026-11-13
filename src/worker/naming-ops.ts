@@ -15,7 +15,6 @@ import { ledgerMovement } from './ledger.ts';
 import { createConfigService } from '../core/config.ts';
 import { walkoverLoser } from '../core/walkover.ts';
 import { getOpenWindow } from './seasons.ts';
-import { assertOpOpen } from './ops-schedule.ts';
 import { createAuditStatement, writeAudit } from '../lib/audit.ts';
 // 对赌抽签（v6.51.0 批 3）：随机源与队映射都是既有实现——seededUnit 只复用不改（确定性契约），
 // tourTeamIdsByClub 用于把 club_id 映射到赛事队 id（本窗已排主场场次/强度分位的取数入口）。
@@ -961,8 +960,6 @@ export async function renewNaming(
   }
   const win = await getOpenWindow(env.DB);
   if (!win) throw new HttpError(409, '转会窗口没开，续约办不了');
-  // v6.49.0 运营时刻表：冠名续约属消费中心（默认「不限制」= 只剩上面那道窗口闸）
-  await assertOpOpen(env.DB, 'consumption');
   const row = await getActiveNaming(env.DB, clubId);
   if (!row) throw new HttpError(404, '该队没有生效冠名');
   if (row.windows_remaining !== 1) {
@@ -1024,8 +1021,6 @@ export async function terminateNaming(
 ): Promise<NamingTerminateResult> {
   const win = await getOpenWindow(env.DB);
   if (!win) throw new HttpError(409, '转会窗口没开，退约也办不了');
-  // v6.49.0 运营时刻表：冠名退约属消费中心（退约是收口动作，但仍在消费中心的口径里）
-  await assertOpOpen(env.DB, 'consumption');
   const row = await getActiveNaming(env.DB, clubId);
   if (!row) throw new HttpError(404, '该队没有生效冠名');
   const params = await loadNamingParams(env.DB);

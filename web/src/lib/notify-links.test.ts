@@ -71,14 +71,22 @@ describe('notificationLink：类目固定落点（无 ref）', () => {
       ['event_resolved', 'desk'],
       ['event_deadline', 'desk'],
       ['window_signals', 'desk'],
-      ['naming_mood', 'venue'],
-      ['naming_terminated', 'venue'],
-      ['naming_champion', 'venue'],
-      ['naming_offer', 'venue'],
-      ['naming_offer_activated', 'venue'],
     ] as const) {
       expect(notificationLink({ template: t, clubId: 7, ref: null })).toBe(`/clubs/7?tab=${tab}`);
       expect(notificationLink({ template: t, clubId: null, ref: null })).toBeNull();
+    }
+  });
+
+  it('冠名站内信统一落消费中心「球场与冠名」页签（v6.84.2）', () => {
+    for (const t of [
+      'naming_mood',
+      'naming_terminated',
+      'naming_champion',
+      'naming_offer',
+      'naming_offer_activated',
+    ] as const) {
+      expect(notificationLink({ template: t, clubId: 7, ref: null })).toBe('/shop?tab=venue');
+      expect(notificationLink({ template: t, clubId: null, ref: null })).toBe('/shop?tab=venue');
     }
   });
 
