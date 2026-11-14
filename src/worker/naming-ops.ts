@@ -967,6 +967,18 @@ export function terminatePenaltyOf(params: NamingParams, windowsRemaining: numbe
   return round3(remaining * feePerWindow * params.terminatePenalty);
 }
 
+/** 冠名签约/续约/退约的赛季窗时钟：优先当前开窗；关窗期沿用最近一个赛季窗。
+ *  冠名报价在关窗批里产生，签约天然发生在关窗后，不能再要求「必须先开窗」。 */
+export async function namingClock(db: Env['DB']): Promise<{ season: number; windowSeq: number }> {
+  const open = await getOpenWindow(db);
+  if (open) return { season: open.season, windowSeq: open.windowSeq };
+  const last = await db
+    .prepare(`SELECT season, window_seq FROM season_windows ORDER BY season DESC, window_seq DESC LIMIT 1`)
+    .first<{ season: number; window_seq: number }>();
+  if (!last) throw new HttpError(409, '还没有赛季窗口，无法办理冠名');
+  return { season: last.season, windowSeq: last.window_seq };
+}
+
 /** 续约（v6.8.0，插件 brand_service.py renew 口径）：只剩最后 1 窗可续；按当前队况与品牌现热度
  *  重算三套餐，原地换约（费用条款/剩余窗数/签约窗一次更新），无独立涨跌系数——价格漂移全由
  *  容量/死忠/热度/行业系数的变化承载。 */
@@ -979,8 +991,7 @@ export async function renewNaming(
   if (!Number.isInteger(packageNo) || packageNo < 1 || packageNo > 3) {
     throw new HttpError(400, '套餐号需为 1-3（1=稳健 2=进取 3=对赌）');
   }
-  const win = await getOpenWindow(env.DB);
-  if (!win) throw new HttpError(409, '转会窗口没开，续约办不了');
+  const clock = await namingClock(env.DB);
   const row = await getActiveNaming(env.DB, clubId);
   if (!row) throw new HttpError(404, '该队没有生效冠名');
   if (row.windows_remaining !== 1) {
@@ -1002,7 +1013,7 @@ export async function renewNaming(
   const baseFee = round3(floor + namingBaseFee(params, stadium.capacity, stadium.fans, brand.heat) * industryFactor(factors, brand.industry));
   const pkg = buildPackages(params, baseFee, floor)[packageNo - 1]!;
   // 对赌条款重抽（v6.51.0 批 3）：续约换约等于新一份合同，条款按新 seed（同季同窗，品牌/队未变 ⇒ 与当窗首次签约同结果）
-  const betTerms = packageNo === 3 ? JSON.stringify(await buildBetTerms(env, clubId, row.brand, win.season, win.windowSeq)) : '';
+  const betTerms = packageNo === 3 ? JSON.stringify(await buildBetTerms(env, clubId, row.brand, clock.season, clock.windowSeq)) : '';
   const now = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
   const out = await env.DB
     .prepare(
@@ -1016,7 +1027,7 @@ export async function renewNaming(
       brand.heat, baseFee, pkg.packageNo, pkg.pkgName, pkg.feePerWindow,
       pkg.windows, pkg.windows, pkg.bonusAmount, pkg.betAttend, pkg.betFans,
       composeVenueName(row.brand, stadium.name), betTerms,
-      win.season, win.windowSeq, row.id,
+      clock.season, clock.windowSeq, row.id,
     )
     .run();
   // 并发守卫：0 行即状态在读到写之间被改过（解约 / 另一窗已续），此时不写审计——审计只记真发生的事
@@ -1041,8 +1052,7 @@ export async function terminateNaming(
   clubId: number,
   actor: number | null,
 ): Promise<NamingTerminateResult> {
-  const win = await getOpenWindow(env.DB);
-  if (!win) throw new HttpError(409, '转会窗口没开，退约也办不了');
+  const clock = await namingClock(env.DB);
   const row = await getActiveNaming(env.DB, clubId);
   if (!row) throw new HttpError(404, '该队没有生效冠名');
   const params = await loadNamingParams(env.DB);
@@ -1055,7 +1065,7 @@ export async function terminateNaming(
          updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
          WHERE id = ? AND status = 'active'`,
       )
-      .bind(win.season, win.windowSeq, row.id),
+      .bind(clock.season, clock.windowSeq, row.id),
   ];
   if (penalty > 0) {
     statements.push(

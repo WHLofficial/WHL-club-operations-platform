@@ -869,12 +869,15 @@ describe('签约与接班 acceptOffer（TC-ACCEPT）', () => {
     expect(countOf(fx.sqlite, 'SELECT COUNT(*) AS n FROM naming_contracts')).toBe(0);
   });
 
-  it('TC-ACCEPT-06 无约且窗口没开 409', async () => {
+  it('TC-ACCEPT-06 无约且窗口没开也能签（冠名不依赖转会窗，v6.85.1）', async () => {
     const fx = freshEnv();
     seedClub(fx.sqlite);
     await seedOpenRound(fx.env); // 轮开着但没有窗口
     const offerId = await seedOffer(fx.env, 1, '斯科尔汽水', 1);
-    await rejectsHttp(acceptOffer(fx.env, offerId, 1, undefined, null), 409, '转会窗口没开，签不了冠名合同');
+    const out = await acceptOffer(fx.env, offerId, 1, undefined, null);
+    expect(out.result).toBe('signed');
+    expect(offerRow(fx.sqlite, offerId).status).toBe('accepted');
+    expect(countOf(fx.sqlite, 'SELECT COUNT(*) AS n FROM naming_contracts')).toBe(1);
   });
 
   it('TC-ACCEPT-07 已有生效冠名：mode 缺省/非法一律 400（文案逐字）', async () => {

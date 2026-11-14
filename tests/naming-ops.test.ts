@@ -224,7 +224,7 @@ describe('签约与解约', () => {
     });
   });
 
-  it('闸：重复签约要显式换约 mode（400）、品牌不在池 400、套餐号非法 400、窗口没开 409', async () => {
+  it('闸：重复签约要显式换约 mode（400）、品牌不在池 400、套餐号非法 400、关窗仍可签（v6.85.1）', async () => {
     const fx = freshEnv();
     seedClub(fx.sqlite);
     await signViaOffer(fx.env, 1, '斯科尔汽水', 1);
@@ -234,10 +234,11 @@ describe('签约与解约', () => {
     await expect(signViaOffer(fx.env, 1, '某个野牌子', 1)).rejects.toMatchObject({ status: 400 });
     await expect(signViaOffer(fx.env, 1, '维洛', 5)).rejects.toMatchObject({ status: 400 });
 
-    // 先退掉现约（mode 检查先于窗口检查，挂着 active 合同永远到不了窗口分支）
+    // v6.85.1：冠名签约不依赖转会窗——关窗后报价仍可签
     fx.sqlite.exec("UPDATE naming_contracts SET status = 'terminated', windows_remaining = 0 WHERE club_id = 1");
     fx.sqlite.exec("UPDATE season_windows SET status = 'closed' WHERE season = 1 AND window_seq = 1");
-    await expect(signViaOffer(fx.env, 1, '洛森餐饮', 1)).rejects.toMatchObject({ status: 409, message: expect.stringContaining('窗口没开') });
+    const signed = await signViaOffer(fx.env, 1, '洛森餐饮', 1);
+    expect(signed.status).toBe('active');
   });
 
   it('消费中心时段关闭不影响冠名签约/续约/退约（v6.84.2）', async () => {
@@ -306,6 +307,16 @@ describe('签约与解约', () => {
     // 赔金为 0 也留痕：状态变更本身要可追溯
     const audit = sqlGet<{ after: string }>(fx.sqlite, "SELECT after FROM audit_log WHERE action = 'naming_terminate'")!;
     expect(JSON.parse(audit.after)).toMatchObject({ status: 'terminated', penalty: 0, remainingWindowsCharged: 0 });
+  });
+
+  it('关窗也能退约（v6.85.1）', async () => {
+    const fx = freshEnv();
+    seedClub(fx.sqlite);
+    seedContract(fx.sqlite, { windowsRemaining: 1 });
+    fx.sqlite.exec("UPDATE season_windows SET status = 'closed' WHERE season = 1 AND window_seq = 1");
+    const out = await terminateNaming(fx.env, 1, 1);
+    expect(out.windowsRemaining).toBeGreaterThan(0);
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM naming_contracts WHERE club_id = 1')).toMatchObject({ status: 'terminated' });
   });
 });
 
@@ -406,7 +417,7 @@ describe('续约（v6.8.0：剩最后 1 窗按当期队况重算，插件 renew 
     await expect(renewNaming(bare.env, 1, 1, 1)).rejects.toMatchObject({ status: 404 });
   });
 
-  it('闸：窗口没开 409 / 品牌已弃用 409', async () => {
+  it('闸：品牌已弃用 409 / 窗口没开仍可续约（v6.85.1）', async () => {
     const fx = freshEnv();
     seedClub(fx.sqlite);
     seedContract(fx.sqlite, { windowsRemaining: 1 });
@@ -417,7 +428,8 @@ describe('续约（v6.8.0：剩最后 1 窗按当期队况重算，插件 renew 
     seedClub(fx2.sqlite);
     seedContract(fx2.sqlite, { windowsRemaining: 1 });
     fx2.sqlite.exec("UPDATE season_windows SET status = 'closed' WHERE season = 1 AND window_seq = 1");
-    await expect(renewNaming(fx2.env, 1, 1, 1)).rejects.toMatchObject({ status: 409, message: expect.stringContaining('窗口没开') });
+    const renewed = await renewNaming(fx2.env, 1, 1, 1);
+    expect(renewed.status).toBe('active');
   });
 });
 

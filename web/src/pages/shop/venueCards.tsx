@@ -89,7 +89,7 @@ function brandHqText(profile: BrandProfile | null, industry: string): string {
 
 export function FacilityOpsCard() {
   const qc = useQueryClient();
-  const { show } = useToast();
+  const { show, toastNode } = useToast();
   // v6.49.0：消费中心时段（consumption）——必须在早退之前调用（hook 顺序固定）
   const consumptionGate = useOpsGate('consumption');
   const infoQuery = useQuery({
@@ -239,6 +239,7 @@ export function FacilityOpsCard() {
           </div>
         ))}
       </div>
+      {toastNode}
     </section>
   );
 }
@@ -251,7 +252,7 @@ function moodLabel(satisfaction: number): string {
 }
 
 export function NamingCard() {
-  const { show } = useToast();
+  const { show, toastNode } = useToast();
   const { dateTime } = useTimeFmt();
   const quoteQuery = useNamingQuote();
   const refresh = useNamingInvalidation();
@@ -554,6 +555,7 @@ export function NamingCard() {
           )}
         </>
       )}
+      {toastNode}
     </section>
   );
 }

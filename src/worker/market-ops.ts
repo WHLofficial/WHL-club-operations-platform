@@ -15,7 +15,6 @@ import { HttpError } from '../lib/http.ts';
 import { createConfigService } from '../core/config.ts';
 import { createAuditStatement, type AuditOrigin } from '../lib/audit.ts';
 import { ledgerMovement } from './ledger.ts';
-import { getOpenWindow } from './seasons.ts';
 import {
   buildBetTerms,
   buildPackages,
@@ -660,6 +659,8 @@ interface OfferDetail {
   status: string;
   expire_at: string;
   round_status: string;
+  opened_season: number;
+  opened_window: number;
   brand: string;
   tier: string;
 }
@@ -682,7 +683,8 @@ export async function acceptOffer(
   const offer = await db
     .prepare(
       `SELECT o.id, o.brand_id, o.club_id, o.package_no, o.amount, o.windows, o.package_json,
-              o.status, o.expire_at, r.status AS round_status, b.brand, b.tier
+              o.status, o.expire_at, r.status AS round_status,
+              r.opened_season, r.opened_window, b.brand, b.tier
        FROM market_offers o
        JOIN market_rounds r ON r.id = o.round_id
        JOIN brand_pool b ON b.id = o.brand_id
@@ -702,12 +704,11 @@ export async function acceptOffer(
   if (offer.round_status !== 'open') throw new HttpError(409, '招商轮已关闭，签不了这份报价');
 
   const active = await getActiveNaming(db, clubId);
-  const win = await getOpenWindow(db);
+  const clock = { season: offer.opened_season, windowSeq: offer.opened_window };
   const mode: AcceptMode | null = active ? (modeInput === 'queued' || modeInput === 'terminate' ? modeInput : null) : null;
   if (active && mode === null) {
     throw new HttpError(400, '已有生效冠名：签新报价请选择「到期后自动接替」或「解约当前并签新」');
   }
-  if (!active && !win) throw new HttpError(409, '转会窗口没开，签不了冠名合同');
 
   const [tierRules, heatRules] = await Promise.all([loadTierRules(db), loadHeatRules(db)]);
   const quota = tierQuotaOf(offer.tier, tierRules);
@@ -770,7 +771,7 @@ export async function acceptOffer(
   }
 
   // signed / terminate：立即成约（terminate 先在同批退掉现约并收赔偿）
-  if (!win) throw new HttpError(409, '转会窗口没开，签不了冠名合同');
+  // 签约不要求开窗：报价在关窗批里产生，签约天然发生在关窗后；窗口字段取报价所属轮。
   const params = await loadNamingParams(db);
   // 批内归属令牌（评审 P0-1）：抢锁句写进 offer 行，同批后续语句全部以它为守卫——
   // 抢锁赢但下游守卫假时整批零落，抢输方也不产生热度/审计/赔款副作用
@@ -788,7 +789,7 @@ export async function acceptOffer(
           `UPDATE naming_contracts SET status = 'terminated', ended_season = ?, ended_window = ?, updated_at = ${nowSql}
            WHERE id = ? AND status = 'active' AND ${claimGuard}`,
         )
-        .bind(win.season, win.windowSeq, active.id, ...claimParams),
+        .bind(clock.season, clock.windowSeq, active.id, ...claimParams),
     );
     if (penalty > 0) {
       terminateStatements.push(
@@ -832,12 +833,12 @@ export async function acceptOffer(
   // 对赌条款快照（v6.51.0 批 3；v6.84.4 起报价期抽定）：优先读报价快照，旧报价才在签约时补抽
   const betTerms =
     offer.package_no === 3
-      ? JSON.stringify(snap.betTerms ?? (await buildBetTerms(env, clubId, offer.brand, win.season, win.windowSeq)))
+      ? JSON.stringify(snap.betTerms ?? (await buildBetTerms(env, clubId, offer.brand, clock.season, clock.windowSeq)))
       : '';
   const contractCols = [
     clubId, offer.brand, snap.brandHeat, snap.baseFee, offer.package_no, snap.pkgName, offer.amount,
     offer.windows, offer.windows, snap.bonusAmount, snap.betAttend, snap.betFans,
-    win.season, win.windowSeq, venueName, betTerms,
+    clock.season, clock.windowSeq, venueName, betTerms,
   ];
   const statements = [
     // 抢锁：并发同刻只一方能把 pending 改掉（claim_token 同时记下本批归属）

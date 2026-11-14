@@ -4,6 +4,18 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.85.1] · 冠名签约不再依赖转会窗；操作反馈可见（2026-11-14，本地完成）
+
+**Fixed**
+
+- 冠名签约/续约/退约不再要求转会窗口处于 open：报价在关窗批里产生，签约天然发生在关窗后。`acceptOffer` 以报价所属轮的 `opened_season/opened_window` 作为合同起始窗与对赌条款兜底 seed；`renewNaming`/`terminateNaming` 用 `namingClock()`（当前开窗优先，关窗取最近赛季窗）。
+- `web/src/pages/shop/venueCards.tsx` 的 `NamingCard`/`FacilityOpsCard` 补渲染 `toastNode`；此前只调用 `show()` 却没有 toast 容器，成功/失败提示全部不可见，接受报价表现为「静默失败」。
+- `tests/market-rounds.test.ts` TC-ACCEPT-06 改为「无窗口也能签」；`tests/naming-ops.test.ts` 补「关窗仍可签/可续/可退」；`venueCards.test.tsx` 补接受报价成功 toast 回归。
+
+**Verification**
+
+- `npm run typecheck` 三份清；`npm test` 213 文件 / 3,288 例全绿；`npm run build` 5.34s 通过。
+
 ## [v6.85.0] · 冠名档位底价：弱队保底收入（2026-11-14，已上线）
 
 **上线**：push `f5988db..4952e51`，CF Workers Builds 自动部署 Version `41ed402c-4a7c-488a-9722-016143842cc4` @2026-11-14T02:39:22Z；线上 `/api/health` 200、入口 `assets/index-CDWvC9Bt.js` 与本地 6.85.0 构建 sha256 逐字节一致（`0835395a…`）、包内版本串 `6.85.0`。

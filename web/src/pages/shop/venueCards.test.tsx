@@ -3,7 +3,7 @@
 // - 门控改吃 build-info 的 open（不再单拉窗口端点）；关窗时扩建 / 升档 / 五类子设施按钮全部置灰
 // - 按钮 title 与卡内一行提示同文案「转会窗口没开，开窗后才能施工」
 // - 关窗优先于其他置灰理由（未开放 / 容量不足）：title 不得被状态原因顶掉
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -279,5 +279,16 @@ describe('v6.84.4 冠名报价卡', () => {
   it('存量旧报价：显示「签约确认时抽定条款」', async () => {
     renderNaming({ offers: [{ ...baseOffer, betTerms: null }] });
     expect(await screen.findByText('存量报价：签约确认时抽定条款')).toBeTruthy();
+  });
+
+  it('无现约时点「接受签约」会 POST 接受端点（v6.84.5 回归）', async () => {
+    apiPostMock.mockResolvedValue({
+      result: 'signed',
+      contract: { brand: '奥维恩', pkgName: '对赌', feePerWindow: 2.5, windowsTotal: 4 },
+    });
+    renderNaming({ contract: null, terminatePenalty: 0, offers: [{ ...baseOffer, betTerms }] });
+    fireEvent.click(await screen.findByText('接受签约'));
+    await waitFor(() => expect(apiPostMock).toHaveBeenCalledWith('/api/club/naming/offers/1/accept', {}));
+    expect(await screen.findByText(/已签下 奥维恩/)).toBeTruthy();
   });
 });
