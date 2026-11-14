@@ -9,6 +9,7 @@ import {
   loadIndustryFactors,
   loadNamingParams,
   namingBaseFee,
+  tierFloorOf,
   type NamingContractRow,
 } from '../src/worker/naming-ops.ts';
 import type { Env } from '../src/worker/env.ts';
@@ -40,9 +41,9 @@ export async function seedOffer(
   }
   const roundId = await seedOpenRound(env);
   const def = await env.DB
-    .prepare(`SELECT id, heat, industry FROM brand_pool WHERE brand = ? AND status = 'adopted'`)
+    .prepare(`SELECT id, heat, industry, tier FROM brand_pool WHERE brand = ? AND status = 'adopted'`)
     .bind(brand)
-    .first<{ id: number; heat: number; industry: string }>();
+    .first<{ id: number; heat: number; industry: string; tier: string }>();
   if (!def) throw new HttpError(400, `品牌「${brand}」不在品牌池`);
   const stadium = await env.DB
     .prepare('SELECT capacity, fans FROM stadiums WHERE club_id = ?')
@@ -50,8 +51,9 @@ export async function seedOffer(
     .first<{ capacity: number; fans: number }>();
   if (!stadium) throw new HttpError(404, '俱乐部还没有球场档案');
   const [params, factors] = await Promise.all([loadNamingParams(env.DB), loadIndustryFactors(env.DB)]);
-  const baseFee = Math.round(namingBaseFee(params, stadium.capacity, stadium.fans, def.heat) * industryFactor(factors, def.industry) * 1000) / 1000;
-  const pkg = buildPackages(params, baseFee)[packageNo - 1]!;
+  const floor = tierFloorOf(params, def.tier);
+  const baseFee = Math.round((floor + namingBaseFee(params, stadium.capacity, stadium.fans, def.heat) * industryFactor(factors, def.industry)) * 1000) / 1000;
+  const pkg = buildPackages(params, baseFee, floor)[packageNo - 1]!;
   const out = await env.DB
     .prepare(
       `INSERT INTO market_offers (round_id, brand_id, club_id, package_no, amount, windows, package_json, status, created_at, expire_at)

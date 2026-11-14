@@ -30,6 +30,7 @@ import {
   namingBaseFee,
   parsePreferTags,
   terminatePenaltyOf,
+  tierFloorOf,
   tierQuotaOf,
   type BetTerms,
   type NamingContractRow,
@@ -398,11 +399,12 @@ export async function buildRoundStatements(env: Env, season: number, windowSeq: 
   const clubSignals = await loadClubSignals(env, season);
   for (const b of sellers) {
     const brandPrefer = parsePreferTags(b.prefer);
+    const floor = tierFloorOf(params, b.tier);
     const valuations = stadiums.results
       .map((s) => ({
         clubId: s.club_id,
-        // 估值 = 冠名底价公式（×热度已在 namingBaseFee 内）× 行业系数，降序（插件 _valuations 同口径）
-        fee: round3(namingBaseFee(params, s.capacity, s.fans, b.heat) * industryFactor(factors, b.industry)),
+        // 估值 = 档位底价 + 冠名底价公式（×热度已在 namingBaseFee 内）× 行业系数，降序（插件 _valuations 同口径 + v6.85.0 A）
+        fee: round3(floor + namingBaseFee(params, s.capacity, s.fans, b.heat) * industryFactor(factors, b.industry)),
         preferHits: preferHitCount(brandPrefer, clubSignals.get(s.club_id)),
       }))
       .sort((x, y) => y.preferHits - x.preferHits || y.fee - x.fee);
@@ -411,7 +413,7 @@ export async function buildRoundStatements(env: Env, season: number, windowSeq: 
     for (const clubId of targets) {
       offeredTeams.add(clubId);
       const fee = valuations.find((v) => v.clubId === clubId)!.fee;
-      const pkg = buildPackages(params, fee)[pkgNo - 1]!;
+      const pkg = buildPackages(params, fee, floor)[pkgNo - 1]!;
       let betTerms: BetTerms | undefined;
       if (pkgNo === 3) {
         const cacheKey = `${clubId}:${b.brand}`;
@@ -935,10 +937,11 @@ export async function spawnVisitOffer(
     }
   }
   const [params, factors, rules] = await Promise.all([loadNamingParams(db), loadIndustryFactors(db), loadRoundRules(db)]);
-  const fee = round3(namingBaseFee(params, club.capacity, club.fans, picked.heat) * industryFactor(factors, picked.industry));
+  const floor = tierFloorOf(params, picked.tier);
+  const fee = round3(floor + namingBaseFee(params, club.capacity, club.fans, picked.heat) * industryFactor(factors, picked.industry));
   // 套餐按品牌招商性格（v6.51.0 批 3）：稳健/进取/对赌各递自家套餐，未登记回落稳健全（插件 offer_spawn 旧口径）
   const pkgNo = packageNoForBrand(picked.tier, picked.style);
-  const pkg = buildPackages(params, fee)[pkgNo - 1] ?? buildPackages(params, fee)[0]!;
+  const pkg = buildPackages(params, fee, floor)[pkgNo - 1] ?? buildPackages(params, fee, floor)[0]!;
   // 对赌条款在报价期抽定（v6.84.4）：上门报价同样随报价快照走，签约/转正不再重抽。
   const betTerms = pkgNo === 3 ? await buildBetTerms(env, club.clubId, picked.brand, open.opened_season, open.opened_window) : undefined;
   const expireAt = rules.offerTtlHours > 0 ? new Date(Date.now() + rules.offerTtlHours * 3_600_000).toISOString() : '9999-12-31T00:00:00.000Z';

@@ -9,6 +9,7 @@ import { resetConfigCache } from '../src/core/config.ts';
 import {
   namingBaseFee, buildPackages, terminateNaming, renewNaming, windowNamingStatements,
   quoteBrands, loadIndustryFactors, industryFactor, brandHeatDelta, windowBrandHeatStatement,
+  loadNamingParams, tierFloorOf,
 } from '../src/worker/naming-ops.ts';
 import { signViaOffer, seedOffer } from './market-helpers.ts';
 import { acceptOffer } from '../src/worker/market-ops.ts';
@@ -91,6 +92,32 @@ describe('底价与三套餐（纯函数，formula.py:462 / build_packages 口�
     expect(pkgs[2]!.betFans).toBe(0.03);
   });
 
+  it('档位底价：缺省 9/6/4；套餐金额以档位价兜底（v6.85.0 A）', () => {
+    expect(tierFloorOf(PARAMS, '头部')).toBe(9);
+    expect(tierFloorOf(PARAMS, '新兴')).toBe(6);
+    expect(tierFloorOf(PARAMS, '口碑')).toBe(4);
+    expect(tierFloorOf(PARAMS, null)).toBe(0);
+    expect(tierFloorOf(PARAMS, '不存在')).toBe(0);
+    expect(tierFloorOf({ ...PARAMS, tierFloor: { 口碑: 5 } }, '口碑')).toBe(5);
+    // 底价 10.895（头部 9 + 1.895）：对赌 7.627 被兜到 9，奖金随兜底后的保底费走
+    const pkgs = buildPackages(PARAMS, 10.895, 9);
+    expect(pkgs.map((p) => p.feePerWindow)).toEqual([9.261, 13.619, 9]);
+    expect(pkgs[2]!.bonusAmount).toBe(6.3);
+  });
+
+  it('loadNamingParams：老配置缺 tierFloor 补默认；非法档位值逐档回落', async () => {
+    const fx = freshEnv();
+    expect((await loadNamingParams(fx.env.DB)).tierFloor).toEqual({ 头部: 9, 新兴: 6, 口碑: 4 });
+    const raw = { ...PARAMS, tierFloor: { 头部: 'x', 新兴: -1, 口碑: 7 } };
+    fx.sqlite.exec(
+      `INSERT INTO config (key, value, updated_at) VALUES ('naming_params', '${JSON.stringify(raw)}', '2026-01-01T00:00:00Z')
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    );
+    resetConfigCache();
+    const p = await loadNamingParams(fx.env.DB);
+    expect(p.tierFloor).toEqual({ 头部: 9, 新兴: 6, 口碑: 7 });
+  });
+
   it('品牌池：迁移种子 16 家落库（v6.51.0 扩编后）、重跑幂等、热度覆盖 0.68-1.3', () => {
     const fx = freshEnv();
     const rows = sqlAll<{ brand: string; heat: number; status: string }>(fx.sqlite, 'SELECT brand, heat, status FROM brand_pool ORDER BY id');
@@ -161,7 +188,7 @@ describe('底价与三套餐（纯函数，formula.py:462 / build_packages 口�
     const factors = await loadIndustryFactors(fx.env.DB);
     expect(factors).toMatchObject({ 医疗: 1.2, 科技: 1.3, 饮食: 1.0 });
     expect(industryFactor(factors, '不存在行业')).toBe(1.0);
-    // 奥维恩（科技 1.3）：namingBaseFee 1.711 × 1.3 = 2.2243 → 2.224
+    // 奥维恩（头部，档位底价 9；科技 1.3）：9 + namingBaseFee 1.711 × 1.3 = 11.224
     const pool: BrandPoolRow[] = [
       {
         id: 1, brand: '奥维恩', heat: 1.3, source: 'builtin', status: 'adopted', industry: '科技', tier: '头部', tier_locked: 0, created_at: 'x',
@@ -170,8 +197,8 @@ describe('底价与三套餐（纯函数，formula.py:462 / build_packages 口�
       },
     ];
     const quotes = quoteBrands(PARAMS, pool, 20000, 18000, factors);
-    expect(quotes[0]!.baseFee).toBe(2.224);
-    expect(quotes[0]!.packages.map((p) => p.feePerWindow)).toEqual([1.89, 2.78, 1.557]); // ×0.85 / ×1.25 / ×0.7
+    expect(quotes[0]!.baseFee).toBe(11.224);
+    expect(quotes[0]!.packages.map((p) => p.feePerWindow)).toEqual([9.54, 14.03, 9]); // ×0.85 / ×1.25 / ×0.7，对赌兜底 9
   });
 });
 
@@ -184,13 +211,13 @@ describe('签约与解约', () => {
       club_id: 1,
       brand: '奥维恩',
       brand_heat: 1.3,
-      base_fee: 2.224, // (0.5+0.6+0.216)×1.3=1.711 → ×行业系数(科技)1.3 = 2.224
+      base_fee: 11.224, // 档位底价 9 + (0.5+0.6+0.216)×1.3=1.711 → ×行业系数(科技)1.3 = 11.224
       package_no: 3,
       pkg_name: '对赌',
-      fee_per_window: 1.557, // 2.224×0.7
+      fee_per_window: 9, // max(9, 11.224×0.7=7.857)
       windows_total: 4,
       windows_remaining: 4,
-      bonus_amount: 1.09, // 1.557×0.7
+      bonus_amount: 6.3, // 9×0.7
       status: 'active',
       started_season: 1,
       started_window: 1,
@@ -250,13 +277,13 @@ describe('签约与解约', () => {
   it('提前解约：赔剩余窗口费用 30%（remaining−1），账本记 naming_penalty；无赔金只改状态', async () => {
     const fx = freshEnv();
     seedClub(fx.sqlite);
-    await signViaOffer(fx.env, 1, '斯科尔汽水', 1); // fee = 0.5×0.85=0.425×... 实算 (0.5+0.6+0.216)×1.0=1.316 → 1.316? heat 1.0 → 1.316
+    await signViaOffer(fx.env, 1, '斯科尔汽水', 1); // 新兴档位底价 6；公式 (0.5+0.6+0.216)×1.0=1.316 → base 7.316
     const out = await terminateNaming(fx.env, 1, 1);
-    // 稳健 fee = 1.316×0.85 = 1.119；赔 (6−1)×1.119×0.3 = 1.6785 → 1.678
-    expect(out).toEqual({ brand: '斯科尔汽水', penalty: 1.678, windowsRemaining: 6 });
+    // 稳健 fee = max(6, 7.316×0.85=6.219) = 6.219；赔 (6−1)×6.219×0.3 = 9.3285 → 9.329
+    expect(out).toEqual({ brand: '斯科尔汽水', penalty: 9.329, windowsRemaining: 6 });
     expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM naming_contracts WHERE club_id = 1')).toMatchObject({ status: 'terminated' });
     const entries = sqlAll<{ kind: string; amount: number }>(fx.sqlite, "SELECT kind, amount FROM ledger_entries WHERE kind = 'naming_penalty'");
-    expect(entries).toEqual([{ kind: 'naming_penalty', amount: -1.678 }]);
+    expect(entries).toEqual([{ kind: 'naming_penalty', amount: -9.329 }]);
     // 留痕：操作人 + 状态变更 + 赔款口径（既赔了几窗、赔了多少）
     const audit = sqlGet<{ actor: number | null; target_type: string; target_id: number; before: string; after: string }>(
       fx.sqlite,
@@ -264,7 +291,7 @@ describe('签约与解约', () => {
     )!;
     expect(audit).toMatchObject({ actor: 1, target_type: 'naming_contract' });
     expect(JSON.parse(audit.before)).toEqual({ status: 'active', windowsRemaining: 6 });
-    expect(JSON.parse(audit.after)).toEqual({ status: 'terminated', windowsRemaining: 6, penalty: 1.678, remainingWindowsCharged: 5 });
+    expect(JSON.parse(audit.after)).toEqual({ status: 'terminated', windowsRemaining: 6, penalty: 9.329, remainingWindowsCharged: 5 });
 
     await expect(terminateNaming(fx.env, 1, 1)).rejects.toMatchObject({ status: 404 });
   });
@@ -358,14 +385,14 @@ describe('续约（v6.8.0：剩最后 1 窗按当期队况重算，插件 renew 
     seedContract(fx.sqlite, { windowsRemaining: 1, packageNo: 3, fee: 1.5, brand: '斯科尔汽水' });
     fx.sqlite.exec("UPDATE brand_pool SET heat = 1.5 WHERE brand = '斯科尔汽水'");
     const row = await renewNaming(fx.env, 1, 1, 1); // 稳健
-    // 斯科尔汽水 heat 1.5：(0.5+0.6+0.216)×1.5 = 1.974 → 行业(饮食)1.0 → 稳健 ×0.85 = 1.6779 → 1.678
+    // 斯科尔汽水（新兴，档位底价 6）heat 1.5：(0.5+0.6+0.216)×1.5 = 1.974 → base 7.974；行业(饮食)1.0 → 稳健 ×0.85 = 6.7779 → 6.778
     expect(row).toMatchObject({
-      brand: '斯科尔汽水', brand_heat: 1.5, base_fee: 1.974, package_no: 1, pkg_name: '稳健',
-      fee_per_window: 1.678, windows_total: 6, windows_remaining: 6, bonus_amount: 0, status: 'active',
+      brand: '斯科尔汽水', brand_heat: 1.5, base_fee: 7.974, package_no: 1, pkg_name: '稳健',
+      fee_per_window: 6.778, windows_total: 6, windows_remaining: 6, bonus_amount: 0, status: 'active',
     });
     const audit = sqlGet<{ before: string; after: string }>(fx.sqlite, "SELECT before, after FROM audit_log WHERE action = 'naming_renew'")!;
     expect(JSON.parse(audit.before)).toMatchObject({ feePerWindow: 1.5, packageNo: 3 });
-    expect(JSON.parse(audit.after)).toMatchObject({ feePerWindow: 1.678, packageNo: 1, windowsTotal: 6 });
+    expect(JSON.parse(audit.after)).toMatchObject({ feePerWindow: 6.778, packageNo: 1, windowsTotal: 6 });
   });
 
   it('闸：非最后 1 窗 400 / 套餐号非法 400 / 无合同 404', async () => {

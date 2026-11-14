@@ -12,7 +12,7 @@
 import type { Env } from './env.ts';
 import { HttpError } from '../lib/http.ts';
 import { ledgerMovement } from './ledger.ts';
-import { createConfigService } from '../core/config.ts';
+import { createConfigService, NAMING_TIER_FLOOR } from '../core/config.ts';
 import { walkoverLoser } from '../core/walkover.ts';
 import { getOpenWindow } from './seasons.ts';
 import { createAuditStatement, writeAudit } from '../lib/audit.ts';
@@ -81,6 +81,8 @@ export interface NamingParams {
   perCapacityWan: number;
   perFansWan: number;
   terminatePenalty: number;
+  /** 档位底价（v6.85.0 A）：每窗最低底价，按品牌 tier 取；缺省回落 core 默认 9/6/4。 */
+  tierFloor?: Partial<Record<'头部' | '新兴' | '口碑', number>>;
   stable: { windows: number; factor: number };
   short: { windows: number; factor: number };
   bet: { windows: number; factor: number; bonusRate: number; attend: number; fans: number };
@@ -96,11 +98,28 @@ export async function loadNamingParams(db: Env['DB']): Promise<NamingParams> {
   ) {
     throw new HttpError(409, '冠名参数（naming_params）未配置或不完整');
   }
-  return p;
+  // 档位底价是 v6.85.0 新增键：老配置行没有它，读取时补默认；非法值逐档回落，不整行 409。
+  const tierFloor: Record<string, number> = { ...NAMING_TIER_FLOOR };
+  if (p.tierFloor && typeof p.tierFloor === 'object') {
+    for (const tier of Object.keys(NAMING_TIER_FLOOR)) {
+      const v = (p.tierFloor as Record<string, unknown>)[tier];
+      if (typeof v === 'number' && Number.isFinite(v) && v >= 0) tierFloor[tier] = v;
+    }
+  }
+  return { ...p, tierFloor };
 }
 
 function round3(n: number): number {
   return Math.round(n * 1000) / 1000;
+}
+
+/** 档位底价（v6.85.0 A）：配置缺失/非法回落 core 默认；未知档位回 0。 */
+export function tierFloorOf(p: NamingParams, tier: string | null | undefined): number {
+  if (!tier) return 0;
+  const key = tier as keyof typeof NAMING_TIER_FLOOR;
+  const configured = p.tierFloor?.[key];
+  if (typeof configured === 'number' && Number.isFinite(configured) && configured >= 0) return configured;
+  return NAMING_TIER_FLOOR[key] ?? 0;
 }
 
 /** 底价/窗口 = (基准 + 容量系数×容量万 + 死忠系数×死忠万) × 热度（formula.py naming_fee:462） */
@@ -108,12 +127,13 @@ export function namingBaseFee(p: NamingParams, capacity: number, fans: number, h
   return round3((p.base + p.perCapacityWan * (capacity / 10000) + p.perFansWan * (fans / 10000)) * heat);
 }
 
-/** 三套餐费用条款（brand_service.py build_packages 口径）：金额=底价×factor，对赌奖金=保底×bonusRate。 */
-export function buildPackages(p: NamingParams, baseFee: number): NamingPackage[] {
-  const betFee = round3(baseFee * p.bet.factor);
+/** 三套餐费用条款（brand_service.py build_packages 口径）：金额=max(档位底价, 底价×factor)，对赌奖金=保底×bonusRate。 */
+export function buildPackages(p: NamingParams, baseFee: number, minFee = 0): NamingPackage[] {
+  const feeOf = (factor: number) => round3(Math.max(minFee, baseFee * factor));
+  const betFee = feeOf(p.bet.factor);
   return [
-    { packageNo: 1, pkgName: '稳健', windows: p.stable.windows, feePerWindow: round3(baseFee * p.stable.factor), bonusAmount: 0, betAttend: null, betFans: null },
-    { packageNo: 2, pkgName: '进取', windows: p.short.windows, feePerWindow: round3(baseFee * p.short.factor), bonusAmount: 0, betAttend: null, betFans: null },
+    { packageNo: 1, pkgName: '稳健', windows: p.stable.windows, feePerWindow: feeOf(p.stable.factor), bonusAmount: 0, betAttend: null, betFans: null },
+    { packageNo: 2, pkgName: '进取', windows: p.short.windows, feePerWindow: feeOf(p.short.factor), bonusAmount: 0, betAttend: null, betFans: null },
     {
       packageNo: 3,
       pkgName: '对赌',
@@ -927,14 +947,15 @@ export function quoteBrands(
   stadiumName?: string | null,
 ): NamingQuote[] {
   return brands.map((b) => {
-    const baseFee = round3(namingBaseFee(p, capacity, fans, b.heat) * industryFactor(factors, b.industry));
+    const floor = tierFloorOf(p, b.tier);
+    const baseFee = round3(floor + namingBaseFee(p, capacity, fans, b.heat) * industryFactor(factors, b.industry));
     return {
       brand: b.brand,
       heat: b.heat,
       industry: b.industry,
       tier: b.tier,
       baseFee,
-      packages: buildPackages(p, baseFee),
+      packages: buildPackages(p, baseFee, floor),
       venueName: venueNameOf('', b.brand, stadiumName),
     };
   });
@@ -966,9 +987,9 @@ export async function renewNaming(
     throw new HttpError(400, `只剩最后 1 窗才能续约（当前剩 ${row.windows_remaining} 窗）`);
   }
   const brand = await env.DB
-    .prepare(`SELECT heat, industry, status FROM brand_pool WHERE brand = ?`)
+    .prepare(`SELECT heat, industry, status, tier FROM brand_pool WHERE brand = ?`)
     .bind(row.brand)
-    .first<{ heat: number; industry: string; status: string }>();
+    .first<{ heat: number; industry: string; status: string; tier: string }>();
   if (!brand || brand.status !== 'adopted') throw new HttpError(409, `品牌「${row.brand}」已不在池中，无法续约`);
   const stadium = await env.DB
     .prepare('SELECT name, capacity, fans FROM stadiums WHERE club_id = ?')
@@ -977,8 +998,9 @@ export async function renewNaming(
   if (!stadium) throw new HttpError(404, '俱乐部还没有球场档案');
   const params = await loadNamingParams(env.DB);
   const factors = await loadIndustryFactors(env.DB);
-  const baseFee = round3(namingBaseFee(params, stadium.capacity, stadium.fans, brand.heat) * industryFactor(factors, brand.industry));
-  const pkg = buildPackages(params, baseFee)[packageNo - 1]!;
+  const floor = tierFloorOf(params, brand.tier);
+  const baseFee = round3(floor + namingBaseFee(params, stadium.capacity, stadium.fans, brand.heat) * industryFactor(factors, brand.industry));
+  const pkg = buildPackages(params, baseFee, floor)[packageNo - 1]!;
   // 对赌条款重抽（v6.51.0 批 3）：续约换约等于新一份合同，条款按新 seed（同季同窗，品牌/队未变 ⇒ 与当窗首次签约同结果）
   const betTerms = packageNo === 3 ? JSON.stringify(await buildBetTerms(env, clubId, row.brand, win.season, win.windowSeq)) : '';
   const now = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";

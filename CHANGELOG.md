@@ -4,6 +4,19 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.85.0] · 冠名档位底价：弱队保底收入（2026-11-14，本地完成）
+
+**Changed**
+
+- `naming_params` 新增 `tierFloor`（头部 `9` / 新兴 `6` / 口碑 `4`，每窗保底），缺省由 `src/core/config.ts` 的 `NAMING_TIER_FLOOR` 提供；老配置无该键时自动补默认，非法档位值逐档回落。
+- 冠名报价改为 `baseFee = tierFloor + namingBaseFee(...) × industryFactor(...)`，三档套餐每项再以 `max(tierFloor, baseFee × factor)` 兜底；对赌奖金按兜底后的套餐费计算。招商轮批量报价（`buildRoundStatements`）、品牌上门（`spawnVisitOffer`）、续约（`renewNaming`）同一口径；已签合同与既有报价快照不追溯。
+- 生产存量 81 条 S9 W2 pending 报价原地重算（写 `tierFloorApplied=1` 幂等标记）：每窗合计 `96.827 → 461.936`、合同总额 `425.432 → 1,982.466`，19 条触发档位兜底；备份 `.tmp/naming-offers-backup-20261114.json`，回滚脚本未执行，审计 id `4823`。零迁移。
+
+**Verification**
+
+- `tests/naming-ops.test.ts` 27/27（新增 `tierFloorOf`、`buildPackages` 兜底、`loadNamingParams` 缺省/非法回落 3 例）、`tests/naming-tiers.test.ts` 26/26、`tests/naming-brand-profile.test.ts` 11/11、`tests/naming-bet-scale.test.ts` 8/8、`tests/market-rounds.test.ts` 76/76；typecheck 三份清；`npm test` **213 文件 / 3,286 例**全绿；`npm run build` 通过。
+- 生产 81 条与代码公式逐条比对 0 差异；`market_offers` 仍全部 pending，当前无开窗、无可签报价。
+
 ## [v6.84.5] · 冠名卡文案：套餐名、企业档、奖金金额（2026-11-13，本地完成）
 
 **Changed**

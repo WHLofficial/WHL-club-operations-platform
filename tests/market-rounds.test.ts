@@ -645,13 +645,13 @@ describe('定向递价（TC-OFFER）', () => {
     const amazon = byBrand('奥维恩');
     expect(amazon.package_no).toBe(2);
     expect(amazon.windows).toBe(2);
-    expect(amazon.amount).toBe(2.78); // round3(round3(1.316×1.3×1.3) × 1.25)
+    expect(amazon.amount).toBe(14.03); // 头部档位底价 9 + round3(1.316×1.3×1.3)=2.224 ⇒ 11.224 × 1.25
     expect((JSON.parse(amazon.package_json) as { pkgName: string }).pkgName).toBe('进取');
     const coke = byBrand('斯科尔汽水');
-    expect([coke.package_no, coke.windows, coke.amount]).toEqual([1, 6, 1.119]);
+    expect([coke.package_no, coke.windows, coke.amount]).toEqual([1, 6, 6.219]); // 新兴档位底价 6 + 1.316 ⇒ 7.316 × 0.85
     expect((JSON.parse(coke.package_json) as { pkgName: string }).pkgName).toBe('稳健');
     const qilin = byBrand('凯利昂生物'); // 头部但招商性格=稳健（v6.51.0）⇒ 按性格递稳健
-    expect([qilin.package_no, qilin.windows, qilin.amount]).toEqual([1, 6, 1.611]); // round3(1.895 × 0.85)
+    expect([qilin.package_no, qilin.windows, qilin.amount]).toEqual([1, 6, 9.261]); // round3((9+1.895) × 0.85)
   });
 
   it('TC-OFFER-06 package_json 是发放时快照：开轮后改热度不影响合同', async () => {
@@ -666,9 +666,9 @@ describe('定向递价（TC-OFFER）', () => {
     fx.sqlite.exec("UPDATE brand_pool SET heat = 1.4 WHERE brand = '奥维恩'");
     const out = await acceptOffer(fx.env, amazon.id, 1, undefined, null);
     const contract = out.contract!;
-    expect(contract.base_fee).toBe(2.224); // 快照底价（旧热度 1.3）
+    expect(contract.base_fee).toBe(11.224); // 快照底价（旧热度 1.3）
     expect(contract.brand_heat).toBe(1.3);
-    expect(contract.fee_per_window).toBe(2.78);
+    expect(contract.fee_per_window).toBe(14.03); // max(9, 11.224 × 1.25)
     expect(contract.package_no).toBe(2);
     expect(contract.windows_total).toBe(2);
     expect(contract.windows_remaining).toBe(2);
@@ -974,12 +974,12 @@ describe('签约与接班 acceptOffer（TC-ACCEPT）', () => {
     await seedOpenRound(fx.env);
     const old = await signViaOffer(fx.env, 1, '星海通讯', 1);
     expect(old.windows_remaining).toBe(6);
-    expect(old.fee_per_window).toBe(1.164); // round3(1.369×0.85)
+    expect(old.fee_per_window).toBe(4.564); // 口碑档底价 4 + round3(1.369×... 实算 5.369×0.85)
     const offerId = await seedOffer(fx.env, 1, '奥维恩', 2);
 
     const out = await acceptOffer(fx.env, offerId, 1, 'terminate', 1);
     expect(out.result).toBe('terminated');
-    expect(out.penalty).toBe(1.746); // round3(5 × 1.164 × 0.3)
+    expect(out.penalty).toBe(6.846); // round3(5 × 4.564 × 0.3)
     expect(out.contract!.brand).toBe('奥维恩');
     const terminated = sqlGet<{ status: string; ended_season: number; ended_window: number }>(
       fx.sqlite,
@@ -991,16 +991,16 @@ describe('签约与接班 acceptOffer（TC-ACCEPT）', () => {
       fx.sqlite,
       "SELECT kind, amount, ref_type, ref_id FROM ledger_entries WHERE kind = 'naming_penalty'",
     )!;
-    expect(entry.amount).toBe(-1.746);
+    expect(entry.amount).toBe(-6.846);
     expect(entry.ref_type).toBe('offer'); // 幂等键＝本报价（重放不再赔）
     expect(entry.ref_id).toBe(offerId);
-    expect(sqlGet<{ balance: number }>(fx.sqlite, 'SELECT balance FROM ledger_accounts WHERE club_id = 1')!.balance).toBe(48.254);
+    expect(sqlGet<{ balance: number }>(fx.sqlite, 'SELECT balance FROM ledger_accounts WHERE club_id = 1')!.balance).toBeCloseTo(43.154, 3);
     expect(countOf(fx.sqlite, "SELECT COUNT(*) AS n FROM naming_contracts WHERE club_id = 1 AND status = 'active'")).toBe(1);
     // 审计 after 带 penalty（有赔款才带）
     const after = JSON.parse(
       sqlGet<{ after: string }>(fx.sqlite, "SELECT after FROM audit_log WHERE action = 'naming_offer_accept' ORDER BY id DESC LIMIT 1")!.after,
     ) as { penalty?: number };
-    expect(after.penalty).toBe(1.746);
+    expect(after.penalty).toBe(6.846);
   });
 
   it('TC-ACCEPT-11 零赔款边界：只剩 1 窗 ⇒ penalty=0、不落账本', async () => {
@@ -1067,10 +1067,10 @@ describe('签约与接班 acceptOffer（TC-ACCEPT）', () => {
     await signViaOffer(fx.env, 1, '星海通讯', 1);
     const offerId = await seedOffer(fx.env, 1, '奥维恩', 2);
     const first = await acceptOffer(fx.env, offerId, 1, 'terminate', null);
-    expect(first.penalty).toBe(1.746);
+    expect(first.penalty).toBe(6.846);
     await rejectsHttp(acceptOffer(fx.env, offerId, 1, 'terminate', null), 409, '这份报价已处理过');
     expect(countOf(fx.sqlite, "SELECT COUNT(*) AS n FROM ledger_entries WHERE kind = 'naming_penalty'")).toBe(1);
-    expect(sqlGet<{ balance: number }>(fx.sqlite, 'SELECT balance FROM ledger_accounts WHERE club_id = 1')!.balance).toBe(48.254);
+    expect(sqlGet<{ balance: number }>(fx.sqlite, 'SELECT balance FROM ledger_accounts WHERE club_id = 1')!.balance).toBeCloseTo(43.154, 3);
   });
 
   it('TC-ACCEPT-15 弃用品牌仍可签（存量报价兑现），但热度不再加', async () => {
@@ -1094,7 +1094,7 @@ describe('签约与接班 acceptOffer（TC-ACCEPT）', () => {
     await signViaOffer(fx.env, 1, '星海通讯', 1);
     const offerId = await seedOffer(fx.env, 1, '奥维恩', 2);
     const out = await acceptOffer(fx.env, offerId, 1, 'terminate', null);
-    expect(out.penalty).toBe(1.746);
+    expect(out.penalty).toBe(6.846);
     const src = readFileSync(MARKET_SRC, 'utf8');
     // 赔款流水：幂等键＝本报价 + claim 守卫（抢锁输方本批不入账）
     expect(src).toContain("refType: 'offer',");
@@ -1110,7 +1110,7 @@ describe('签约与接班 acceptOffer（TC-ACCEPT）', () => {
     const replay = await fx.env.DB.batch(
       ledgerMovement(fx.env.DB, {
         clubId: 1,
-        delta: -1.746,
+        delta: -6.846,
         kind: 'naming_penalty',
         refType: 'offer',
         refId: offerId,
@@ -1143,8 +1143,8 @@ describe('接班转正 activateQueuedStatements（TC-QUEUED）', () => {
 
     const contract = (await getActiveNaming(fx.env.DB, 1))!;
     expect(contract.brand).toBe('埃尔巴草本');
-    expect(contract.base_fee).toBe(1.105); // 快照底价：埃尔巴草本 heat 0.7 × 医疗系数 1.2
-    expect(contract.fee_per_window).toBe(0.939); // 口碑档稳健 = round3(1.105 × 0.85)，取自报价 amount
+    expect(contract.base_fee).toBe(5.105); // 快照底价：埃尔巴草本 heat 0.7 × 医疗系数 1.2
+    expect(contract.fee_per_window).toBe(4.339); // 口碑档稳健 = round3(5.105 × 0.85)，取自报价 amount
     expect(contract.brand_heat).toBe(0.7);
     expect(contract.pkg_name).toBe('稳健');
     expect(contract.windows_total).toBe(6);
@@ -1404,16 +1404,16 @@ describe('品牌上门递价 spawnVisitOffer（TC-SPAWN）', () => {
     await seedOpenRound(fx.env);
     const occ = seedOccurrence(fx.sqlite);
     const spawn = await spawnVisitOffer(fx.env, { clubId: 1, capacity: 20000, fans: 18000 }, occ, PENDING_GUARD);
-    expect(spawn.applied).toEqual({ brand: '凯利昂生物', amount: 1.611, windows: 6 });
-    expect(spawn.notes).toEqual(['品牌「凯利昂生物」上门递价：1.611M/窗 × 6 窗（稳健），冠名市场可签']);
+    expect(spawn.applied).toEqual({ brand: '凯利昂生物', amount: 9.261, windows: 6 });
+    expect(spawn.notes).toEqual(['品牌「凯利昂生物」上门递价：9.261M/窗 × 6 窗（稳健），冠名市场可签']);
     expect(spawn.statements).toHaveLength(0); // 独立执行，不进 occurrence 批
     const row = sqlGet<OfferRow>(
       fx.sqlite,
       `SELECT o.* FROM market_offers o JOIN brand_pool b ON b.id = o.brand_id WHERE b.brand = '凯利昂生物'`,
     )!;
-    expect([row.status, row.package_no, row.windows, row.amount]).toEqual(['pending', 1, 6, 1.611]);
+    expect([row.status, row.package_no, row.windows, row.amount]).toEqual(['pending', 1, 6, 9.261]);
     const snap = JSON.parse(row.package_json) as { pkgName: string; baseFee: number; brandHeat: number };
-    expect(snap).toMatchObject({ pkgName: '稳健', baseFee: 1.895, brandHeat: 1.2 });
+    expect(snap).toMatchObject({ pkgName: '稳健', baseFee: 10.895, brandHeat: 1.2 });
     expect(row.expire_at).not.toBe('9999-12-31T00:00:00.000Z'); // 默认 72h
   });
 
@@ -1769,7 +1769,7 @@ describe('冠名市场与招商轮路由（TC-ROUTE）', () => {
     )!;
     expect(notification.user_id).toBe(1);
     expect((JSON.parse(notification.payload) as { text: string }).text).toBe(
-      '✅ 品牌接替生效：「埃尔巴草本·球场1」正式启用（稳健套餐，0.939M/窗 × 6 窗）。\n—— 埃尔巴草本（帕多瓦）',
+      '✅ 品牌接替生效：「埃尔巴草本·球场1」正式启用（稳健套餐，4.339M/窗 × 6 窗）。\n—— 埃尔巴草本（帕多瓦）',
     );
   });
 

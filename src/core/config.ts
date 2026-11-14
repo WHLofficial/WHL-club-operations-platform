@@ -113,6 +113,14 @@ export const CONFIG_KEYS = [
 
 export type ConfigKey = (typeof CONFIG_KEYS)[number];
 
+// v6.85.0 冠名档位底价 A（弱队真收入过渡）：每窗最低底价按品牌档位兜底。
+// 这是 formula 底价的加法起点（不是替代），不改原 base/容量/死忠系数；B（商业线中央均分 + 自招盘）留 S10。
+export const NAMING_TIER_FLOOR: Readonly<Record<'头部' | '新兴' | '口碑', number>> = {
+  头部: 9,
+  新兴: 6,
+  口碑: 4,
+};
+
 // 有具体默认值的键；json 类与「待定」键缺省（get 返回 null）。
 export const CONFIG_DEFAULTS: Partial<Record<ConfigKey, string>> = {
   tax_rates: '0.10,0.20,0.40',
@@ -205,6 +213,7 @@ export const CONFIG_DEFAULTS: Partial<Record<ConfigKey, string>> = {
     perCapacityWan: 0.3,
     perFansWan: 0.12,
     terminatePenalty: 0.3,
+    tierFloor: NAMING_TIER_FLOOR,
     stable: { windows: 6, factor: 0.85 },
     short: { windows: 2, factor: 1.25 },
     bet: { windows: 4, factor: 0.7, bonusRate: 0.7, attend: 0.8, fans: 0.03 },
