@@ -531,7 +531,8 @@ describe('招商轮清盘与开轮（TC-ROUND）', () => {
       'statements.push(...round.openStatements, ...activation.statements);',
     );
     expect(home).toContain('const round = opts.chargeNaming ? await buildRoundStatements(env, season, windowSeq) : null;');
-    expect(home).toContain('const activation = await activateQueuedStatements(env, season, windowSeq, \'user\', opts.actor ?? null);');
+    expect(home).toContain("const activation = await activateQueuedStatements(env, season, windowSeq, 'user', opts.actor ?? null, undefined, {");
+    expect(home).toContain('firstFeeClubIds');
     // 临时窗不带 market 段（chargeNaming=false 由关窗机传）
     const machine = readFileSync(MACHINE_SRC, 'utf8');
     expect(machine).toContain('chargeNaming: !isTemporary');
@@ -807,6 +808,8 @@ describe('签约与接班 acceptOffer（TC-ACCEPT）', () => {
     expect(contract.status).toBe('active');
     expect(contract.started_season).toBe(1);
     expect(contract.started_window).toBe(1);
+    expect(contract.windows_remaining).toBe(6); // 开窗内签约仍由关窗批收首窗
+    expect(countOf(fx.sqlite, "SELECT COUNT(*) AS n FROM ledger_entries WHERE kind = 'naming_fee'")).toBe(0);
     expect(offerRow(fx.sqlite, offerId).status).toBe('accepted');
     expect(brandHeat(fx.sqlite, '斯科尔汽水')).toBe(1.02);
     const audit = sqlGet<{ action: string; target_type: string; target_id: number; actor: number | null }>(
@@ -869,15 +872,23 @@ describe('签约与接班 acceptOffer（TC-ACCEPT）', () => {
     expect(countOf(fx.sqlite, 'SELECT COUNT(*) AS n FROM naming_contracts')).toBe(0);
   });
 
-  it('TC-ACCEPT-06 无约且窗口没开也能签（冠名不依赖转会窗，v6.85.1）', async () => {
+  it('TC-ACCEPT-06 无约且窗口没开也能签（冠名不依赖转会窗，v6.85.1）；起始窗已过则立即补发首窗（v6.85.2）', async () => {
     const fx = freshEnv();
     seedClub(fx.sqlite);
     await seedOpenRound(fx.env); // 轮开着但没有窗口
     const offerId = await seedOffer(fx.env, 1, '斯科尔汽水', 1);
     const out = await acceptOffer(fx.env, offerId, 1, undefined, null);
     expect(out.result).toBe('signed');
+    expect(out.contract!.windows_remaining).toBe(5);
     expect(offerRow(fx.sqlite, offerId).status).toBe('accepted');
     expect(countOf(fx.sqlite, 'SELECT COUNT(*) AS n FROM naming_contracts')).toBe(1);
+    const fee = sqlGet<{ amount: number; ref_type: string; ref_id: number }>(
+      fx.sqlite,
+      "SELECT amount, ref_type, ref_id FROM ledger_entries WHERE kind = 'naming_fee'",
+    )!;
+    expect(fee.amount).toBe(out.contract!.fee_per_window);
+    expect(fee.ref_type).toBe('offer');
+    expect(fee.ref_id).toBe(offerId);
   });
 
   it('TC-ACCEPT-07 已有生效冠名：mode 缺省/非法一律 400（文案逐字）', async () => {
@@ -1159,6 +1170,34 @@ describe('接班转正 activateQueuedStatements（TC-QUEUED）', () => {
     expect(countOf(fx.sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'naming_activated'")).toBe(1);
   });
 
+  it('TC-QUEUED-01c 本窗无旧合同收费：接班转正同批补发首窗（v6.85.2）', async () => {
+    const fx = freshEnv();
+    seedClub(fx.sqlite);
+    openWindow(fx.sqlite);
+    await seedOpenRound(fx.env);
+    const old = await signViaOffer(fx.env, 1, '星海通讯', 1);
+    const offerId = await seedOffer(fx.env, 1, '埃尔巴草本', 1);
+    await acceptOffer(fx.env, offerId, 1, 'queued', null);
+
+    // 旧约在关窗批前已退约且没有本窗 naming_fee（批首不会为它收租）
+    fx.sqlite.exec(`UPDATE naming_contracts SET status = 'terminated' WHERE id = ${old.id}`);
+    const activation = await activateQueuedStatements(fx.env, 2, 1, 'user', null, undefined, {
+      firstFeeClubIds: [1],
+    });
+    await fx.env.DB.batch(activation.statements);
+
+    const contract = (await getActiveNaming(fx.env.DB, 1))!;
+    expect(contract.brand).toBe('埃尔巴草本');
+    expect(contract.windows_remaining).toBe(5);
+    const fee = sqlGet<{ amount: number; ref_type: string; ref_id: number }>(
+      fx.sqlite,
+      "SELECT amount, ref_type, ref_id FROM ledger_entries WHERE kind = 'naming_fee'",
+    )!;
+    expect(fee.amount).toBe(contract.fee_per_window);
+    expect(fee.ref_type).toBe('offer');
+    expect(fee.ref_id).toBe(offerId);
+  });
+
   it('TC-QUEUED-01b CPU 队的 queued 报价不转正（不再生成合同/审计）', async () => {
     const fx = freshEnv();
     seedClub(fx.sqlite);
@@ -1193,6 +1232,24 @@ describe('接班转正 activateQueuedStatements（TC-QUEUED）', () => {
     expect(offerRow(fx.sqlite, offerId).status).toBe('queued');
     expect(countOf(fx.sqlite, "SELECT COUNT(*) AS n FROM naming_contracts WHERE brand = '埃尔巴草本'")).toBe(0);
     expect(countOf(fx.sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'naming_activated'")).toBe(0);
+    expect((await getActiveNaming(fx.env.DB, 1))!.brand).toBe('星海通讯');
+  });
+
+  it('TC-QUEUED-02b 首窗补发不绕过合同落库：仍有 active 时不收费', async () => {
+    const fx = freshEnv();
+    seedClub(fx.sqlite);
+    openWindow(fx.sqlite);
+    await seedOpenRound(fx.env);
+    await signViaOffer(fx.env, 1, '星海通讯', 1);
+    const offerId = await seedOffer(fx.env, 1, '埃尔巴草本', 1);
+    await acceptOffer(fx.env, offerId, 1, 'queued', null);
+
+    const activation = await activateQueuedStatements(fx.env, 1, 2, 'user', null, undefined, {
+      firstFeeClubIds: [1],
+    });
+    await fx.env.DB.batch(activation.statements);
+    expect(activation.activated).toHaveLength(0);
+    expect(countOf(fx.sqlite, "SELECT COUNT(*) AS n FROM ledger_entries WHERE kind = 'naming_fee'")).toBe(0);
     expect((await getActiveNaming(fx.env.DB, 1))!.brand).toBe('星海通讯');
   });
 

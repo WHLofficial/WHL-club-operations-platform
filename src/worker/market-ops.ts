@@ -36,6 +36,7 @@ import {
 } from './naming-ops.ts';
 import { leagueStandings } from './season-settle.ts';
 import { clubIdByTourTeam } from './prizes.ts';
+import { getOpenWindow } from './seasons.ts';
 
 const nowSql = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
 
@@ -504,6 +505,7 @@ export async function activateQueuedStatements(
   origin: AuditOrigin,
   actor: number | null,
   clubIds?: number[],
+  opts: { firstFeeClubIds?: readonly number[] } = {},
 ): Promise<{ statements: ReturnType<Env['DB']['prepare']>[]; activated: QueuedActivation[] }> {
   const db = env.DB;
   const scope = clubIds && clubIds.length > 0 ? ` AND o.club_id IN (${clubIds.map(() => '?').join(',')})` : '';
@@ -546,6 +548,13 @@ export async function activateQueuedStatements(
       q.package_no === 3
         ? JSON.stringify(snap.betTerms ?? (await buildBetTerms(env, q.club_id, q.brand, season, windowSeq)))
         : '';
+    // v6.85.2：关窗批里本队本窗没有旧合同的收费语句（退约后空置/无主合同）时，
+    // 接班合同当刻起算，首窗费用同批补发；有旧合同已付本窗的队不重复收。
+    const chargeFirst = opts.firstFeeClubIds?.includes(q.club_id) ?? false;
+    const remainingWindows = chargeFirst ? Math.max(0, q.windows - 1) : q.windows;
+    const contractStatus = remainingWindows > 0 ? 'active' : 'expired';
+    const endedSeason = remainingWindows > 0 ? null : season;
+    const endedWindow = remainingWindows > 0 ? null : windowSeq;
     // 构建期仍有 active 的队不进通知列表（语句照生成，执行期守卫决定落不落）
     if (!actives.has(q.club_id)) {
       activated.push({
@@ -572,16 +581,29 @@ export async function activateQueuedStatements(
           `INSERT INTO naming_contracts
            (club_id, brand, brand_heat, base_fee, package_no, pkg_name, fee_per_window,
             windows_total, windows_remaining, bonus_amount, bet_attend, bet_fans, status,
-            started_season, started_window, venue_name, bet_terms, created_at, updated_at)
-           SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ${nowSql}, ${nowSql}
+            started_season, started_window, ended_season, ended_window, venue_name, bet_terms, created_at, updated_at)
+           SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${nowSql}, ${nowSql}
            WHERE NOT EXISTS (SELECT 1 FROM naming_contracts WHERE club_id = ? AND status = 'active')
              AND (SELECT status FROM market_offers WHERE id = ?) = 'accepted'`,
         )
         .bind(
           q.club_id, q.brand, snap.brandHeat, snap.baseFee, q.package_no, snap.pkgName, q.amount,
-          q.windows, q.windows, snap.bonusAmount, snap.betAttend, snap.betFans,
-          season, windowSeq, venueName, betTerms, q.club_id, q.id,
+          q.windows, remainingWindows, snap.bonusAmount, snap.betAttend, snap.betFans,
+          contractStatus, season, windowSeq, endedSeason, endedWindow, venueName, betTerms, q.club_id, q.id,
         ),
+      ...(chargeFirst
+        ? ledgerMovement(db, {
+            clubId: q.club_id,
+            delta: q.amount,
+            kind: 'naming_fee',
+            refType: 'offer',
+            refId: q.id,
+            memo: `${q.brand} 冠名费（首窗，接班转正即发）`,
+            idempotent: true,
+            // 只有前一条合同 INSERT 真的落行才收费：active/报价状态守卫失败时 changes()=0。
+            guardSql: 'changes() > 0',
+          })
+        : []),
       audit({
         actor,
         action: 'naming_activated',
@@ -705,6 +727,12 @@ export async function acceptOffer(
 
   const active = await getActiveNaming(db, clubId);
   const clock = { season: offer.opened_season, windowSeq: offer.opened_window };
+  // v6.85.2：报价来自已关窗的轮次时，合同起始窗的窗末已经结算过；此时签约要立即补发首窗，
+  // 否则球队会白等一个窗。若起始窗正是当前开窗，则仍由该窗关窗批统一收租（避免同窗双付）。
+  const openWindow = await getOpenWindow(db);
+  const startWindowOpen =
+    openWindow !== null && openWindow.season === clock.season && openWindow.windowSeq === clock.windowSeq;
+  const chargeFirstWindow = !active && !startWindowOpen;
   const mode: AcceptMode | null = active ? (modeInput === 'queued' || modeInput === 'terminate' ? modeInput : null) : null;
   if (active && mode === null) {
     throw new HttpError(400, '已有生效冠名：签新报价请选择「到期后自动接替」或「解约当前并签新」');
@@ -835,10 +863,15 @@ export async function acceptOffer(
     offer.package_no === 3
       ? JSON.stringify(snap.betTerms ?? (await buildBetTerms(env, clubId, offer.brand, clock.season, clock.windowSeq)))
       : '';
+  // 补发首窗时合同直接少一窗；套餐均 ≥2 窗，正常不会在签约当刻到期。
+  const remainingWindows = chargeFirstWindow ? Math.max(0, offer.windows - 1) : offer.windows;
+  const contractStatus = remainingWindows > 0 ? 'active' : 'expired';
+  const endedSeason = remainingWindows > 0 ? null : clock.season;
+  const endedWindow = remainingWindows > 0 ? null : clock.windowSeq;
   const contractCols = [
     clubId, offer.brand, snap.brandHeat, snap.baseFee, offer.package_no, snap.pkgName, offer.amount,
-    offer.windows, offer.windows, snap.bonusAmount, snap.betAttend, snap.betFans,
-    clock.season, clock.windowSeq, venueName, betTerms,
+    offer.windows, remainingWindows, snap.bonusAmount, snap.betAttend, snap.betFans,
+    contractStatus, clock.season, clock.windowSeq, endedSeason, endedWindow, venueName, betTerms,
   ];
   const statements = [
     // 抢锁：并发同刻只一方能把 pending 改掉（claim_token 同时记下本批归属）
@@ -849,8 +882,8 @@ export async function acceptOffer(
         `INSERT INTO naming_contracts
          (club_id, brand, brand_heat, base_fee, package_no, pkg_name, fee_per_window,
           windows_total, windows_remaining, bonus_amount, bet_attend, bet_fans, status,
-          started_season, started_window, venue_name, bet_terms, created_at, updated_at)
-         SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ${nowSql}, ${nowSql}
+          started_season, started_window, ended_season, ended_window, venue_name, bet_terms, created_at, updated_at)
+         SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${nowSql}, ${nowSql}
          WHERE ${claimGuard}${
           active
             ? ` AND NOT EXISTS (SELECT 1 FROM naming_contracts WHERE club_id = ? AND status = 'active')${quotaGuard}`
@@ -858,6 +891,21 @@ export async function acceptOffer(
         }`,
       )
       .bind(...contractCols, ...claimParams, ...(active ? [clubId, ...quotaParams] : [])),
+    // v6.85.2：签约时起始窗已关（或已过期轮次）→ 立即补发首窗，不等下一次关窗。
+    // 幂等键用报价 id，避免与关窗批按 window 记的旧合同费用撞键。
+    ...(chargeFirstWindow
+      ? ledgerMovement(db, {
+          clubId,
+          delta: offer.amount,
+          kind: 'naming_fee',
+          refType: 'offer',
+          refId: offerId,
+          memo: `${offer.brand} 冠名费（首窗，签约即发）`,
+          idempotent: true,
+          // 只有前一条合同 INSERT 真的落行才收费（terminate 换签的 active 竞态失败时 changes()=0）。
+          guardSql: 'changes() > 0',
+        })
+      : []),
     // 签约成交：品牌热度 +deal（SQL 侧钳制累加；守卫钉在 claim 上，抢输方不动热度）
     db
       .prepare(
@@ -877,6 +925,7 @@ export async function acceptOffer(
         feePerWindow: offer.amount,
         windows: offer.windows,
         packageNo: offer.package_no,
+        ...(chargeFirstWindow ? { firstFeePaid: offer.amount, windowsRemaining: remainingWindows } : {}),
         ...(penalty > 0 ? { penalty } : {}),
       },
       guardSql: claimGuard,
@@ -886,7 +935,13 @@ export async function acceptOffer(
   const outs = await db.batch(statements);
   // 守卫假只发生在抢锁句：claim 方案下后续语句挂同一令牌，抢锁成败即整批成败
   if ((outs[0]?.meta.changes ?? 0) === 0) throw new HttpError(409, '报价已被处理或条件已变化，请刷新后重试');
-  const contract = await getActiveNaming(db, clubId);
+  const contract =
+    (await getActiveNaming(db, clubId)) ??
+    // 极端 1 窗套餐：首窗补发后当刻到期，回读刚插入的行让调用方仍能拿到合同快照。
+    (await db
+      .prepare(`SELECT * FROM naming_contracts WHERE club_id = ? ORDER BY id DESC LIMIT 1`)
+      .bind(clubId)
+      .first<NamingContractRow>());
   if (!contract) throw new HttpError(500, '冠名合同落库后读不回来');
   return { result: active ? 'terminated' : 'signed', contract, penalty };
 }

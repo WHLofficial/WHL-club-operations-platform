@@ -598,6 +598,8 @@ export async function windowHomeStatements(
   const notifications: PendingClubNotification[] = [];
   const moodReports: import('./naming-ops.ts').SatisfactionReport[] = [];
   const terminatedReports: import('./naming-ops.ts').SatisfactionReport[] = [];
+  // v6.85.2：本窗已收过冠名费的队（旧合同在批首收租），接班转正时不再重复收首窗
+  const namingFeeClubs = new Set<number>();
   const summary: HomeWindowSummary = {
     maintenanceClubs: 0,
     maintenanceTotal: 0,
@@ -721,6 +723,7 @@ export async function windowHomeStatements(
       );
       summary.namingClubs++;
       summary.namingTotal = Math.round((summary.namingTotal + naming.fee_per_window) * 100) / 100;
+      namingFeeClubs.add(s.club_id);
       // 品牌热度动态（v6.8.0）：本队近 3 场全胜/全败调 brand_pool.heat（目录无映射的队跳过）
       if (tourTeamId !== undefined) {
         const heatStmt = await windowBrandHeatStatement(env, naming, tourTeamId);
@@ -776,7 +779,13 @@ export async function windowHomeStatements(
   const activated: import('./market-ops.ts').QueuedActivation[] = [];
   if (round) {
     // 评审 P2-1：actor 透传（origin 'user' 配 actor 记真操作人；缺省 null = 系统口径）
-    const activation = await activateQueuedStatements(env, season, windowSeq, 'user', opts.actor ?? null);
+    // v6.85.2：本窗没有旧合同收费的队，接班合同当刻起算、同批补发首窗
+    const firstFeeClubIds = opts.chargeNaming
+      ? stadiums.results.filter((s) => s.is_cpu !== 1 && !namingFeeClubs.has(s.club_id)).map((s) => s.club_id)
+      : [];
+    const activation = await activateQueuedStatements(env, season, windowSeq, 'user', opts.actor ?? null, undefined, {
+      firstFeeClubIds,
+    });
     statements.push(...round.openStatements, ...activation.statements);
     summary.marketOffers = round.offerCount;
     summary.activatedClubs = activation.activated.length;

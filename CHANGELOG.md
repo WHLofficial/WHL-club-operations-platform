@@ -4,6 +4,20 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.85.2] · 冠名首窗在签约/接班时即发（2026-11-14，本地完成）
+
+**Fixed**
+
+- 冠名合同在「起始窗已经结算、签约时又没有开窗」时白送一窗：`acceptOffer` 现在判断 `chargeFirstWindow = !active && !startWindowOpen`，首窗 `naming_fee` 立即入账、`windows_remaining` 直接减 1；合同总窗数不变，不再跨 7 个窗。
+- 接班转正同样补首窗：`activateQueuedStatements` 新增 `firstFeeClubIds` 选项；关窗批先收旧约、再转正 queued，本窗没有旧合同收费的队当批补发首窗。
+- 有开窗时仍按原节奏在关窗批收首窗，不提前入账；有 active 的换签不补首窗，避免旧合同已收同窗。
+- 首窗流水 `kind='naming_fee'`、`ref_type='offer'`、`ref_id=报价 id`、`idempotent=true`，与关窗批的 `naming_fee` 同口径，重复执行不会二次入账。
+- 测试：`tests/market-rounds.test.ts` TC-ACCEPT-01 断言开窗内不预收；TC-ACCEPT-06 断言无窗口签约即发首窗、`windows_remaining=5`；新增 TC-QUEUED-01c 覆盖接班补发、TC-QUEUED-02b 覆盖 active 竞态时不收费；home 源锁断言同步。
+
+**Verification**
+
+- `npm run typecheck` 三份清；`npm test` 213 文件 / 3,290 例全绿；`npm run build` 4.63s 通过。
+
 ## [v6.85.1] · 冠名签约不再依赖转会窗；操作反馈可见（2026-11-14，已上线）
 
 **上线**：push `4952e51..aad4602`（含 v6.85.0 发布记录文档枚），CF Workers Builds 自动部署 Version `e1644782-5d9c-4216-b605-4291b5ea700f` @2026-11-14T05:14:00Z；线上 `/api/health` 200、入口 `assets/index-vVbT3a-e.js`、包内版本串 `6.85.1`。
