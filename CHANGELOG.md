@@ -4,7 +4,9 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
-## [v6.85.2] · 冠名首窗在签约/接班时即发（2026-11-14，本地完成）
+## [v6.85.2] · 冠名首窗在签约/接班时即发（2026-11-14，已上线 Version 4553fb98）
+
+**上线**：push `aad4602..61f27c8`，CF Workers Builds 自动部署 Version `4553fb98-f5ee-4cfc-9bb2-47d8ac1f14dd` @2026-11-14T06:02:28Z；线上 `/api/health` 200、入口 `assets/index-Cm3GI6vT.js`、包内版本串 `6.85.2`。存量里昂合同（id=1，club 66）已补首窗：`windows_remaining 6→5`、`naming_fee +9.251`（`ref_type='offer'`, `ref_id=2`）、审计 `naming_first_fee_backfill` 1 条。
 
 **Fixed**
 
