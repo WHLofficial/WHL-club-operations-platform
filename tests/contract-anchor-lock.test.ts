@@ -44,6 +44,104 @@ const FILES = {
   negotiationsSection: 'web/src/pages/market/desk/NegotiationsSection.tsx',
 } as const;
 
+// —— 金样常量（TC-REG-02/03，测试计划 §6 步骤 2「金样先行」高级裁决切片）——
+// 来源：src/worker/routes/registration.ts 施工前工作区字节。本切片亲证抄录时工作区 == 提交态 88023d3
+// （git status --porcelain 该文件为空、:21 三名版 import、:474 裸 c.json、batch2.ts SquadNumberUpdateResponse
+// 零命中；88023d3 为该文件最后触碰提交）。若将来重抄且施工已落地，禁止从漂移工作区取——
+// 改从 git show 88023d3:src/worker/routes/registration.ts 取（pin 语义，来源证明力不打折）。
+// 常量存原始字节、不预归一化；比较口径 = 归一化整段全等（norm(段).toBe(norm(GOLD))，TC-REG-02/03 评审毛病 4）。
+// GOLD_REG_EMPTY 是 A6 空态七键漂移（含 registration: null 原样）的「本批没碰它」钉子，非长期契约——
+// 下批修复空态时随批改写金样（测试计划 A6 原文口径）。
+const GOLD_REG_EMPTY = `  if (!club) {
+    return c.json({
+      club: null,
+      season: null,
+      players: [],
+      registration: null,
+      compliance: null,
+      rules: null,
+      pendingSummary: { count: 0, wageDelta: 0 },
+    });
+  }`;
+
+const GOLD_REG_MAIN = `  return c.json<SquadOverview>({
+    club: { id: club.id, name: club.name, leagueTier: tier },
+    season,
+    // 报名状态探测（v1.2.0）：registeredInTournament=已报定级赛事（tier 非 null）
+    registeredInTournament: tier !== null,
+    players: players.map((p) => {
+      const contract = contractMap.get(p.id) ?? null;
+      const pending = pendingByPlayer.get(p.id) ?? null;
+      return {
+        id: p.id,
+        fcId: p.fc_id,
+        uid: p.uid,
+        name: rowDisplayName(p),
+        number: p.number,
+        position: p.position,
+        age: p.age,
+        ca: p.ca,
+        pa: p.pa,
+        baseCa: p.base_ca,
+        // 标记（v6.30.0 C 段）：纯函数与 /api/players 同一口径（初始 CA 缺省回现值）
+        marker: markerOf(p.base_ca ?? p.ca, p.pa, p.growable === 1, p.ca),
+        growable: p.growable === 1,
+        isFutureStar: p.is_future_star === 1,
+        chinaPlan: p.china_plan === 1,
+        prestige: p.prestige,
+        // 影响力（v6.37.0）：与 /api/players 同源（influenceOf 镜像，现值 CA/PA 口径）
+        influence: influenceOf(inflCoefs, p.ca, p.pa, p.growable === 1, p.prestige),
+        status: p.status,
+        marketValue: p.market_value,
+        foot: p.foot,
+        growthTier: p.growth_tier,
+        agentTier: p.agent_tier,
+        badgesSilver: p.badges_silver,
+        badgesGold: p.badges_gold,
+        wage: contract?.wage ?? null,
+        releaseFee: contract?.releaseFee ?? null,
+        contractType: contract?.contractType ?? null,
+        source: contract?.source ?? null,
+        serviceSeasons: contract?.serviceSeasons ?? null,
+        protected: contract?.protected ?? false,
+        // 槽位对齐：保留 15 长度、缺槽为 null（前端金徽判定要按真实槽位，口径同 routes/players.ts:802-808）
+        psIds: Array.from({ length: PS_SLOT_COUNT }, (_, i) => {
+          const v = (p as unknown as Record<string, unknown>)[\`ps\${i + 1}\`];
+          return v === null || v === undefined || !Number.isFinite(Number(v)) ? null : Number(v);
+        }),
+        hasContract: contract !== null,
+        squad: squadByPlayer.get(p.id) ?? null,
+        // 待生效（v6.54.0 步骤 7，§10.5）：工资/违约金新值 + 来源；releaseFee 为 null = RC 不变，
+        // 前端据此只给工资加第二行。本端点只服务本队教练，不会外泄给访客。
+        hasPending: pending !== null,
+        pendingWage: pending?.wage ?? null,
+        pendingReleaseFee: pending?.releaseFee ?? null,
+        pendingSource: pending?.source ?? null,
+        pendingProtectionTicks: pending?.protectionTicks ?? null,
+        pendingEffectiveWindowSeq: pending?.effectiveWindowSeq ?? null,
+        // 免费续约机会（v6.62.0 §5.6）：只有本队教练可见，控制续约入口的「本次免费」提示
+        freeRcAvailable: contract !== null && contract.freeRcUsed === 0,
+      };
+    }),
+    pendingSummary: { count: pendingChanges.length, wageDelta: Math.round(pendingWageDelta * 100) / 100 },
+    compliance,
+    /** 未签约球员 ID（D2：单开一区，不占人数、不计工资） */
+    unsigned: unsignedIds,
+    loyalty,
+    wages,
+    rules: rules === null
+      ? null
+      : {
+          squadMin: rules.squadMin,
+          squadMax: rules.squadMax,
+          gkMin: rules.gkMin,
+          traineeMax: rules.traineeMax,
+          wageCap: rules.wageCap,
+          limits: rules.limits,
+          tier: rules.tier,
+        },
+  });`;
+
 describe('施工表路径自检', () => {
   it('13 个受锁文件全部可读且非空（防路径写错把锁扫空）', () => {
     const paths = Object.values(FILES);
@@ -185,12 +283,15 @@ describe('growth-tier 契约锚点锁', () => {
 });
 
 describe('registration 契约锚点锁', () => {
-  it('三型换源 batch2，本地 NumberConflict 退役，传导锚点（players/rules/issues/compliance）在场', () => {
+  it('batch2 契约锚点两态锁：spec ② 施工后锁终态四型，施工前锁现状缺口（landed 探测自动切换）', () => {
     const text = src(FILES.registration);
-    expect(text, 'registration:SquadOverview/SquadNumbersResponse/NumberConflict 契约 import').toContain(
-      "import type { NumberConflict, SquadNumbersResponse, SquadOverview } from '../../contract/batch2.ts';",
-    );
-    // SquadOverview：主响应顶层泛型（players/rules/issues/compliance 等子对象全靠它传导）
+    // 两态开关：源码含 SquadNumberUpdateResponse = spec ② 已施工。两分支各自把对应形态逐字锁死——
+    // 施工前有人乱动现状 → 现状分支红；施工落地即自动切终态分支（零人工改锁），此后再回退 → 终态分支红；
+    // 半施工态（只改 import 不加泛型 / 只改 :474 不动 web）落进终态分支按缺的那半红。门禁口径：
+    // 锁必须与工作区现实自洽，施工切片未落地时终态判据不得挂成活红（TC-REG-01① 的「三名版不作
+    // 施工后断言」只约束施工后时点，施工前作现状断言不在其禁）。
+    const landed = text.includes('SquadNumberUpdateResponse');
+    // SquadOverview：主响应顶层泛型（players/rules/issues/compliance 等子对象全靠它传导）——两态同锁
     expect(text, 'registration:SquadOverview 主响应泛型').toContain('return c.json<SquadOverview>({');
     // SquadPlayerRow：players.map 字面量随顶层泛型传导（不另起局部变量）
     expect(text, 'registration:SquadPlayerRow players.map 传导').toContain('players: players.map((p) => {');
@@ -208,15 +309,101 @@ describe('registration 契约锚点锁', () => {
     expect(text, 'registration:NumberConflict resolveNumberAssignments 返回型').toContain(
       'conflicts: NumberConflict[]',
     );
-    // 409 冲突体有意不并入契约（走 ApiError.conflicts 消费），错误通道保持原样
+    // 409 冲突体有意不并入契约（走 ApiError.conflicts 消费），错误通道保持原样——两态同锁
     expect(text, 'registration 号码冲突 409 错误通道不并入契约').toContain(
       "return c.json({ error: '有号码和队友冲突，先处理标红的号码', code: 'number_conflict', conflicts }, 409);",
     );
     expect(text, 'registration:SquadNumbersResponse 批量改号回执泛型').toContain(
       'return c.json<SquadNumbersResponse>({ ok: true, applied });',
     );
-    // 本地重复定义退役
+    // 本地重复定义退役——两态同锁（契约型在场也不许在 worker 里再养本地 interface）
     expect(text, '本地 interface NumberConflict 必须退役').not.toContain('interface NumberConflict');
+    expect(text, '本地 interface SquadNumberUpdateResponse 必须退役（真源 batch2）').not.toContain(
+      'interface SquadNumberUpdateResponse',
+    );
+
+    if (landed) {
+      // —— 终态（施工表 anchor③/⑦；TC-REG-01① 终态四名版，ASCII 序 SquadNumberUpdate < SquadNumbers）——
+      expect(text, 'registration:四名版契约 import').toContain(
+        "import type { NumberConflict, SquadNumberUpdateResponse, SquadNumbersResponse, SquadOverview } from '../../contract/batch2.ts';",
+      );
+      expect(text, 'registration 三名旧 import 必须退役').not.toContain(
+        "import type { NumberConflict, SquadNumbersResponse, SquadOverview } from '../../contract/batch2.ts';",
+      );
+      // SquadNumberUpdateResponse：单条改号回执补具名（POST /api/club/players/:id/number，v4.0.0 裸 c.json），
+      // 字面量逐字节不动只加泛型；normalizeNumber 归一 String(n)/清号 null ⇒ number: string | null 零 cast
+      expect(text, 'registration:SquadNumberUpdateResponse 单条改号回执泛型').toContain(
+        'return c.json<SquadNumberUpdateResponse>({ ok: true, id: playerId, number: assignment.number });',
+      );
+      // 防假绿计数：主响应 :189 / 批量 :451 / 单条 :474 恰 3 处（409 冲突体走裸 c.json 错误通道不计）
+      expect(text.match(/return c\.json</g) ?? [], 'registration 泛型端点数应为 3').toHaveLength(3);
+      // web 消费侧（TC-SN-04）：re-export 必经 api.ts（字母序插 SquadNumbersResponse 之前），
+      // 两处调用点换契约型、内联手抄型退役（NegotiationsSection 旧型 number: number 是手抄错型）
+      expect(src(FILES.webApi), 'web api:SquadNumberUpdateResponse 紧邻 SquadNumbersResponse 补登').toContain(
+        'SquadNumberUpdateResponse, SquadNumbersResponse,',
+      );
+      expect(src(FILES.playerPage), 'Player.tsx 单条改号调用点换契约型').toContain(
+        'await apiPost<SquadNumberUpdateResponse>(`/api/club/players/${player.id}/number`, {',
+      );
+      expect(src(FILES.playerPage), 'Player.tsx 旧内联型退役（契约 number 为 string|null）').not.toContain(
+        '{ ok: boolean; number: string | null }',
+      );
+      expect(src(FILES.negotiationsSection), 'NegotiationsSection 单条改号调用点换契约型').toContain(
+        'await apiPost<SquadNumberUpdateResponse>(',
+      );
+      expect(
+        src(FILES.negotiationsSection),
+        'NegotiationsSection 手抄错型退役（载荷 number 实为 string|null 非 number）',
+      ).not.toContain('{ ok: boolean; number: number }');
+    } else {
+      // —— 现状（施工前缺口登记；spec ② 施工落地即由 landed 自动切走，无需人工改锁）——
+      expect(text, 'registration:三名版契约 import（施工前现状锚）').toContain(
+        "import type { NumberConflict, SquadNumbersResponse, SquadOverview } from '../../contract/batch2.ts';",
+      );
+      expect(text, 'registration:单条改号回执仍裸 c.json（缺口登记，等 spec ② 补具名）').toContain(
+        'return c.json({ ok: true, id: playerId, number: assignment.number });',
+      );
+      // 防假绿计数（施工前）：主响应 :189 / 批量 :451 恰 2 处，:474 裸不计
+      expect(text.match(/return c\.json</g) ?? [], 'registration 泛型端点数应为 2（:474 尚未挂泛型）').toHaveLength(2);
+      expect(src(FILES.webApi), 'web api 尚无 SquadNumberUpdateResponse re-export（缺口登记）').not.toContain(
+        'SquadNumberUpdateResponse',
+      );
+      expect(src(FILES.playerPage), 'Player.tsx 仍内联手抄型（缺口登记）').toContain(
+        'await apiPost<{ ok: boolean; number: string | null }>(`/api/club/players/${player.id}/number`, {',
+      );
+      expect(src(FILES.negotiationsSection), 'NegotiationsSection 仍手抄错型（缺口登记）').toContain(
+        'await apiPost<{ ok: boolean; number: number }>(`/api/club/players/${player.id}/number`, {',
+      );
+    }
+  });
+});
+
+describe('registration 金样锁（TC-REG-02/03）', () => {
+  /** 按行号切片（1 起含端点）：窗口 [from, to] → 0 起 slice(from-1, to) */
+  const sliceLines = (file: string, from: number, to: number): string =>
+    readFileSync(file, 'utf8')
+      .split('\n')
+      .slice(from - 1, to)
+      .join('\n');
+
+  it('TC-REG-02 主响应装配整段 :189-265 与金样归一化全等', () => {
+    const seg = sliceLines(FILES.registration, 189, 265);
+    // 漂移哨兵：本批施工无插行（行号不漂移），上方一旦插行窗口即错位——大声红，不静默比错代码
+    // （norm 折叠保留段首前导空格，先 trimStart 再比段首内容）
+    expect(
+      norm(seg).trimStart().startsWith('return c.json<SquadOverview>({ '),
+      '主响应金样窗口错位哨兵',
+    ).toBe(true);
+    expect(norm(seg), '主响应十键 / players.map 38 字段 / rules 七字段 / compliance 装配零漂移').toBe(
+      norm(GOLD_REG_MAIN),
+    );
+  });
+
+  it('TC-REG-03 空态分支整段 :124-134 与金样归一化全等', () => {
+    const seg = sliceLines(FILES.registration, 124, 134);
+    expect(norm(seg).trimStart().startsWith('if (!club) {'), '空态金样窗口错位哨兵').toBe(true);
+    // A6 空态七键（含 registration: null）原样锁死——「本批没碰它」钉子，非长期契约
+    expect(norm(seg), '空态分支零漂移（不标注 / 不删键 / 不补键 / 不加 cast）').toBe(norm(GOLD_REG_EMPTY));
   });
 });
 
@@ -261,6 +448,9 @@ describe('players 既有锚点复核锁', () => {
 describe('锁判据自检（错一个字必须不匹配，防恒真）', () => {
   it('每组抽代表锚点错一字后，在对应源码里必须失配', () => {
     // 逐组代表锚点：覆盖「契约 import」「返回标注」「泛型」「收窄字段」「传导」「既有锚点」六类判据
+    // registration 单条回执样本随施工态切换（与 registration 组两态锁同一开关）：终态泛型串 / 施工前裸串，
+    // 两串在对应态的真实源码里各自在场，错一字都必须失配
+    const regLanded = src(FILES.registration).includes('SquadNumberUpdateResponse');
     const samples: { file: string; expected: string; label: string }[] = [
       {
         file: FILES.negotiations,
@@ -318,6 +508,17 @@ describe('锁判据自检（错一个字必须不匹配，防恒真）', () => {
           '? checkSquad(view.firstTeam.map(viewToSquadPlayer), view.trainee.map(viewToSquadPlayer), rules)',
         label: 'registration SquadCompliance 传导',
       },
+      regLanded
+        ? {
+            file: FILES.registration,
+            expected: 'return c.json<SquadNumberUpdateResponse>({ ok: true, id: playerId, number: assignment.number });',
+            label: 'registration 单条改号回执泛型',
+          }
+        : {
+            file: FILES.registration,
+            expected: 'return c.json({ ok: true, id: playerId, number: assignment.number });',
+            label: 'registration 单条改号回执裸 c.json（施工前现状）',
+          },
       {
         file: FILES.seaSealed,
         expected: 'return c.json<SeaCancelResult>(await cancelCurrentBatch(c.env, user.id ?? null, batchId, note));',
