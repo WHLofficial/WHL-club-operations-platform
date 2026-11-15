@@ -27,6 +27,7 @@ import { voidDemandStatements } from './demand-ops.ts';
 import { queueAllUserClubsNotification } from './notify.ts';
 import { notifyShortlistWatchers } from './shortlist.ts';
 import { advanceStatement } from './listing-ops.ts';
+import { restoreAfterListing } from './player-ops.ts';
 
 function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
@@ -1270,12 +1271,8 @@ export async function rejectTransfer(
   if (transfer.status === 'rejected') return { status: 'already' };
   if (transfer.status !== 'pending_review') throw new HttpError(409, `转会单当前状态是 ${transfer.status}，不能驳回`);
   const listingId = listingIdFromTransfer(transfer);
-  // 球员还原状态按合同类型：激活挂牌还原回训练营，普通挂牌还原回一线队
-  const contract = await db
-    .prepare('SELECT contract_type FROM contracts WHERE player_id = ? AND is_active = 1')
-    .bind(transfer.player_id)
-    .first<{ contract_type: string }>();
-  const playerStatus = contract?.contract_type === 'trainee' ? 'trainee' : 'normal';
+  // v6.87.0 B3 修复 + 收编：原 JS 预读合同三元（对自由身无合同退化恒 normal）删除，还原改
+  // 统一 CASE（SQL 内派生，少一次 D1 SELECT）。解约单/无挂牌单据 listingId null 透传不加 EXISTS。
 
   const audit = createAuditStatement(db);
   const statements: D1PreparedStatement[] = [
@@ -1291,9 +1288,8 @@ export async function rejectTransfer(
       .bind(listingId),
     // listingId 可能为 null（无关联挂牌）：原语句以 null 绑定即 no-op，这里同值透传（类型仅为编译期断言）
     advanceStatement(db, listingId as number, 'review_rejected', {}),
-    db
-      .prepare(`UPDATE players SET status = ?, updated_at = ${nowSql()} WHERE id = ? AND status = 'listed'`)
-      .bind(playerStatus, transfer.player_id),
+    // v6.87.0 收编：还原走统一母本（CASE 三分支 + listingId 非 null 时的 EXISTS delisted 守卫）
+    restoreAfterListing(db, transfer.player_id, listingId),
   ];
   const statusStmtIndex = statements.length;
   statements.push(

@@ -427,6 +427,39 @@ describe('匹配 / 放行 / 到期', () => {
     expect(notices.map((n) => n.club_id).sort((a, b) => a - b)).toEqual([fx.ownerClub, fx.buyerClub].sort((a, b) => a - b));
   });
 
+  it('v6.87.0 B1：trainee 合同球员被匹配留人后按合同还原 trainee，驳回后仍自洽', async () => {
+    // B1 红测（v6.87.0 施工表）：activations.ts:122 允许 trainee 起点被激活 ⇒ 匹配留人必须按
+    // 合同还原 trainee（统一还原 CASE 的 trainee 分支），而不是固定 normal。
+    const fx = await seedActivation(freshEnv());
+    // 训练营合同球员（TRAINEE_ACTIVATION_FEE = 5，activations.ts:86 isTrainee 定价路径）
+    fx.sqlite.exec(
+      `INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, status) VALUES
+         (34, 'fc34', '青训苗子', ${fx.ownerClub}, 'CM', 18, 70, 88, 'trainee');
+       INSERT INTO contracts (id, player_id, club_id, release_fee, wage, contract_type, is_active, signed_at, effective_from, service_ticks, protection_ticks) VALUES
+         (5, 34, ${fx.ownerClub}, 5, 0.5, 'trainee', 1, '2026-06-01T00:00:00Z', '2026-06-01', 0, NULL);`,
+    );
+    // ① 激活 → 201（trainee 起点合法）
+    const act = await post('/api/transfers/activation', { playerId: 34, proofMediaKey: proofKey(fx.buyerClub) }, 'tok-coach2', fx.env);
+    expect(act.status).toBe(201);
+    const listingId = ((await act.json()) as { listingId: number }).listingId;
+    // ② 首价落定 + 截止拨前 → matched_pending（沿用 seedMatchPending 范式）
+    expect((await post(`/api/market/listings/${listingId}/bids`, { amount: 5 }, 'tok-coach2', fx.env)).status).toBe(201);
+    fx.sqlite.exec(`UPDATE listings SET deadline_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 minute') WHERE id = ${listingId}`);
+    expect((await get('/api/market/listings', undefined, fx.env)).status).toBe(200);
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM listings WHERE id = ?', listingId)?.status).toBe('matched_pending');
+    // ③ 卖方匹配留人（新 RC 25 > 首价 5；差额 20 由原东家 100m 承担）
+    const match = await post('/api/transfers/match', { listingId, newReleaseFee: 25 }, 'tok-coach', fx.env);
+    expect(match.status).toBe(201);
+    // ④ 还原按合同：trainee（当前实现固定写 normal ⇒ 红——normal + active trainee 合同违反 I3）
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM players WHERE id = 34')?.status).toBe('trainee');
+    // ⑤ 续走审核驳回（match 单 pending_review → rejected）
+    const taskId = await openReviewTaskId(fx);
+    expect((await post(`/api/admin/reviews/${taskId}/reject`, { note: '驳回' }, 'tok-admin', fx.env)).status).toBe(200);
+    // ⑥ 仍 trainee：修复后 rejectTransfer 的还原句 WHERE status='listed' 0 行 no-op，
+    //    trainee 合同 + trainee 状态自洽（当前实现此格同样红）
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM players WHERE id = 34')?.status).toBe('trainee');
+  });
+
   it('生涯只可被匹配一次（4.4.2.4）', async () => {
     const fx = await seedMatchPending();
     fx.env.rng = () => 0.5;

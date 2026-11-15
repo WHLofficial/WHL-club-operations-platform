@@ -1096,3 +1096,62 @@ describe('挂牌 dup 四态统一（v6.80.0 第二批）', () => {
     }
   });
 });
+
+// ---------- v6.87.0 批 1 红测（player-ops-state）：自由身强拍的还原缺 free 分支（B2/B3） ----------
+
+describe('v6.87.0 批 1 红测：自由身强拍还原 free', () => {
+  // 自由身强拍夹具：players{club_id: NULL, status: 'free'} + 走真实强拍创建入口（bypass.ts
+  // clubId=null 分支 markListed），复用 seedMarket 的俱乐部/资金/开窗种子。
+  async function seedFreeAgentAuction(): Promise<{ fx: Fixture; mf: MarketFixture; listingId: number }> {
+    const fx = freshEnv();
+    const mf = await seedMarket(fx);
+    fx.sqlite.exec(
+      `INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, status) VALUES
+         (12, 'fc12', '自由身乙', NULL, 'CM', 26, 80, 82, 'free');`,
+    );
+    const created = await adminPost('/api/admin/forced-auctions', { playerId: 12, askPrice: 3 }, 'tok-admin', fx.env);
+    expect(created.status).toBe(201);
+    const listingId = ((await created.json()) as { listingId: number }).listingId;
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM players WHERE id = 12')?.status).toBe('listed');
+    return { fx, mf, listingId };
+  }
+
+  it('B2：强拍作废（force-void）还原 free——不是幽灵 normal（自由身筛选面不漏人）', async () => {
+    const { fx, listingId } = await seedFreeAgentAuction();
+    const res = await adminPost(`/api/admin/market/listings/${listingId}/force-void`, { reason: '自由身强拍作废' }, 'tok-admin', fx.env);
+    expect(res.status).toBe(200);
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM listings WHERE id = ?', listingId)?.status).toBe('delisted');
+    // 当前实现经 playerRestoreSql 写幽灵 normal ⇒ 红；修复后按 CASE 首分支还原 free
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM players WHERE id = 12')?.status).toBe('free');
+    // 自由身筛选面能见到该球员（幽灵 normal 会让 free 筛选漏人、仅海捞可自愈）
+    const freeFace = await get('/api/players?status=free', 'tok-viewer', fx.env);
+    expect(freeFace.status).toBe(200);
+    const ids = ((await freeFace.json()) as { players: { id: number }[] }).players.map((p) => p.id);
+    expect(ids).toContain(12);
+  });
+
+  it('B3：自由身强拍成交送审被驳回后还原 free——不是幽灵 normal', async () => {
+    const { fx, listingId } = await seedFreeAgentAuction();
+    // 出价（买方 50m，首价即起拍价 3）
+    expect((await post(`/api/market/listings/${listingId}/bids`, { amount: 3 }, 'tok-coach2', fx.env)).status).toBe(201);
+    // 截止结算 → forced_auction 单 pending_review（自由身 from_club_id = NULL，market-settle.ts:84-85）
+    fx.sqlite.exec(
+      `UPDATE listings SET last_bid_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-11 days'),
+           listed_day = strftime('%Y-%m-%d', 'now', '-13 days'), deadline_at = NULL WHERE id = ${listingId}`,
+    );
+    resetSettleCoalesce();
+    expect((await get('/api/market/listings?status=all', 'tok-viewer', fx.env)).status).toBe(200);
+    const transfer = sqlGet<{ id: number; type: string; status: string; from_club_id: number | null }>(
+      fx.sqlite,
+      'SELECT id, type, status, from_club_id FROM transfers WHERE idempotency_key = ?',
+      `listing:${listingId}`,
+    );
+    expect(transfer).toMatchObject({ type: 'forced_auction', status: 'pending_review', from_club_id: null });
+    // 审核驳回（走 rejectTransfer 同批 [3]review_rejected → delisted、[4] 还原）
+    const taskId = sqlGet<{ id: number }>(fx.sqlite, "SELECT id FROM review_tasks WHERE type = 'transfer_confirm' ORDER BY id DESC LIMIT 1")!.id;
+    const reject = await post(`/api/admin/reviews/${taskId}/reject`, { note: '驳回' }, 'tok-admin', fx.env);
+    expect(reject.status).toBe(200);
+    // 当前实现 :1274-1278 JS 预算对自由身（无合同）退化为恒 normal ⇒ 红；修复后 CASE 首分支 → free
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM players WHERE id = 12')?.status).toBe('free');
+  });
+});

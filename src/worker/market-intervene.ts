@@ -6,9 +6,10 @@ import { HttpError } from '../lib/http.ts';
 import { loadTransfer } from './transfers.ts';
 import { createAuditStatement } from '../lib/audit.ts';
 import { settleListingForReview, type ListingCore } from './market-settle.ts';
-import { forceSettleAtExpected, playerRestoreSql, voidSigningCore } from './negotiations.ts';
+import { forceSettleAtExpected, voidSigningCore } from './negotiations.ts';
 import { revertDeal } from './deal-revert.ts';
 import { advanceStatement } from './listing-ops.ts';
+import { restoreAfterListing } from './player-ops.ts';
 
 async function loadListingCore(db: Env['DB'], listingId: number): Promise<ListingCore | null> {
   return db
@@ -89,7 +90,10 @@ export async function adminForceVoid(env: Env, listingId: number, actor: number,
     advanceStatement(db, listingId, 'admin_cancel', { reason }),
     db.prepare(`UPDATE fund_holds SET status = 'released' WHERE ref_type = 'listing' AND ref_id = ? AND status = 'held'`).bind(listingId),
     db.prepare(`UPDATE bids SET status = 'withdrawn' WHERE listing_id = ? AND status = 'active'`).bind(listingId),
-    playerRestoreSql(db, listing.player_id),
+    // v6.87.0 B2 修复 + 收编：原局部还原句缺 free 分支——:84 只筛 status 不筛 type，
+    // forced 型自由身强拍（v6.60.5）在列，作废会写幽灵 normal（不能再强拍、free 筛选面漏人）。
+    // 改走统一还原母本（CASE 补 free + EXISTS delisted 守卫，admin_cancel 先落 delisted，P1-1 同款防幻影）
+    restoreAfterListing(db, listing.player_id, listingId),
     audit({ actor, action: 'admin_force_void', targetType: 'listing', targetId: listingId, origin: 'user', after: { reason, playerId: listing.player_id } }),
   ]);
   return (results[0]?.meta.changes ?? 0) > 0 ? 'done' : 'already';

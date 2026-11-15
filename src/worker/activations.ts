@@ -19,6 +19,7 @@ import { queueClubNotification } from './notify.ts';
 import { sqlDisplayName } from '../core/player-name.ts';
 import { findActivePromotionSession } from './negotiation-guard.ts';
 import { advanceStatement } from './listing-ops.ts';
+import { restoreAfterListing } from './player-ops.ts';
 // 契约类型锚点（v6.82.0 第 6 批）：激活回执以 src/contract/batch6.ts 为唯一真源——本地同名
 // interface ActivationResult 删除定义改 import（ok 字面 true 与契约一致，甄别随批补甄别收窄）。
 // 匹配决定回执以 batch5.ts 的 MatchDecisionResult 为真源（第 5 批登记的锚点缺口在本批兑现；
@@ -293,9 +294,10 @@ export async function submitMatch(
     db
       .prepare(`UPDATE fund_holds SET status = 'released' WHERE ref_type = 'listing' AND ref_id = ? AND status = 'held'`)
       .bind(listing.id),
-    db
-      .prepare(`UPDATE players SET status = 'normal', updated_at = ${nowSql()} WHERE id = ? AND status = 'listed'`)
-      .bind(listing.player_id),
+    // v6.87.0 B1 修复 + 收编：原固定写 'normal'——:122 允许 trainee 起点被激活，匹配留人后
+    // normal + active trainee 合同错位（违反 I3）。改统一还原母本按合同派生（trainee→trainee），
+    // 并新增 EXISTS delisted 守卫（matched_kept 先落 delisted，同批 [2]，P1-1 同款防幻影）
+    restoreAfterListing(db, listing.player_id, listing.id),
   ];
   const results = await db.batch(statements);
   if ((results[2]?.meta.changes ?? 0) === 0) throw new HttpError(409, '匹配没落库，这单激活状态刚变过，刷新再试');

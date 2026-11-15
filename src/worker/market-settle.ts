@@ -17,6 +17,7 @@ import { completeTermination } from './transfers.ts';
 import { queueClubNotification } from './notify.ts';
 import { sqlDisplayName } from '../core/player-name.ts';
 import { advance, advanceStatement } from './listing-ops.ts';
+import { restoreAfterListing } from './player-ops.ts';
 
 function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
@@ -177,18 +178,9 @@ export async function delistUnbid(
   const audit = createAuditStatement(db);
   const statements = [
     advanceStatement(db, listing.id, 'unbid_expired', { isActivation, source }),
-    // 评审修复（P1-1）：球员还原/解冻/审计都必须以「本批确实把挂牌改成 delisted」为前提。
-    // 与并发出价交错（本句 0 行改）时，旧版会把球员还原成非挂牌态、把冻结放掉、写幻影审计
-    db
-      .prepare(
-        `UPDATE players SET status = CASE
-           WHEN club_id IS NULL THEN 'free'
-           WHEN (SELECT contract_type FROM contracts WHERE player_id = ? AND is_active = 1) = 'trainee' THEN 'trainee'
-           ELSE 'normal' END, updated_at = ${nowSql()}
-         WHERE id = ? AND status = 'listed'
-           AND EXISTS (SELECT 1 FROM listings WHERE id = ? AND status = 'delisted')`,
-      )
-      .bind(listing.player_id, listing.player_id, listing.id),
+    // 评审修复（P1-1）：球员还原必须以「本批确实把挂牌改成 delisted」为前提。EXISTS 守卫已收编进
+    // restoreAfterListing（统一还原母本，v6.87.0）——并发出价交错（本句 0 行改）时不还原、不放冻结
+    restoreAfterListing(db, listing.player_id, listing.id),
     ...(fee > 0 && listing.seller_club_id !== null
       ? ledgerMovement(db, {
           clubId: listing.seller_club_id,
@@ -281,15 +273,9 @@ export async function voidExpiredActivation(
   const audit = createAuditStatement(db);
   const statements = [
     advanceStatement(db, listingId, 'activation_price_expired', {}),
-    db
-      .prepare(
-        `UPDATE players SET status = CASE WHEN (
-           SELECT contract_type FROM contracts WHERE player_id = ? AND is_active = 1
-         ) = 'trainee' THEN 'trainee' ELSE 'normal' END, updated_at = ${nowSql()}
-         WHERE id = ? AND status = 'listed'
-           AND EXISTS (SELECT 1 FROM listings WHERE id = ? AND status = 'delisted')`,
-      )
-      .bind(playerId, playerId, listingId),
+    // v6.87.0 收编：原句是母本的残缺变体（缺 free 分支）——激活入口（activations.ts:70）挡
+    // club_id NULL，free 分支运行时不可达、纯防御；EXISTS 守卫原句已有，随 helper 归一
+    restoreAfterListing(db, playerId, listingId),
     audit({
       actor,
       action: 'activation_void',

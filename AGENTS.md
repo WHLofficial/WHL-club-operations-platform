@@ -63,6 +63,7 @@ npm run dev:web            # 只改前端时用（Vite，/api 代理到 8791）
 - **跨端契约类型唯一真源在 `src/contract/`（纯类型层，按批/域分文件）**：`web/src/lib/api.ts` 只 re-export、不得手抄已迁移类型；worker 侧响应装配点以契约类型为锚标注（装配函数 return 标注或 `c.json` 泛型）；契约类型跟随 worker `c.json` 载荷现实，改载荷先改契约再两侧接线。此规则长期有效。
 - **worker 端点响应一律用契约类型锚定——`c.json<契约型>` 或函数返回标注；契约字段变动必须在 worker 侧编译期暴露，禁止 `as`/`any`/`@ts-ignore` 绕过。**（v6.86.0）
 - **listings 状态转移一律走 `src/worker/listing-ops.ts` 的 `advance`/`advanceStatement`，不许直写 `UPDATE listings SET status`。**
+- **players.status 一律走 `src/worker/player-ops.ts` 的 `advance`/`advanceStatement`（还原走 `restoreAfterListing`/`restoreAfterNegotiation`），禁止裸写 `UPDATE players SET status`。**（v6.87.0 起；pure 类写点迁移随后续批补齐）
 
 ## 文档纪律
 

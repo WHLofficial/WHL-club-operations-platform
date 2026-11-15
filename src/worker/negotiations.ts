@@ -33,6 +33,7 @@ import { assertOpOpen } from './ops-schedule.ts';
 import { freeAgentFee, freeAgentFeeGap } from '../core/bypass-rules.ts';
 import { availableBalance, creditLineGuard, ledgerMovement } from './ledger.ts';
 import { advanceStatement } from './listing-ops.ts';
+import { restoreAfterListing } from './player-ops.ts';
 import type { WageForecast } from '../contract/batch1.ts';
 import type { MyNegotiations, NegotiationSession, OfferResult, ReleaseFeeResult, TraineeSignResult, TransferType } from '../contract/batch5.ts';
 
@@ -921,17 +922,8 @@ async function loadVoidReasons(db: Env['DB'], sessionIds: number[]): Promise<Map
 
 // ---- 作废签约谈判的收口（v6.49.0：管理介入与到期引擎共用一处） ----
 
-// 球员还原按合同类型：激活挂牌还原回训练营，普通挂牌还原回一线队（与审核驳回同口径）
-export function playerRestoreSql(db: Env['DB'], playerId: number) {
-  return db
-    .prepare(
-      `UPDATE players SET status = CASE WHEN (
-         SELECT contract_type FROM contracts WHERE player_id = ? AND is_active = 1
-       ) = 'trainee' THEN 'trainee' ELSE 'normal' END, updated_at = ${nowSql()}
-       WHERE id = ? AND status = 'listed'`,
-    )
-    .bind(playerId, playerId);
-}
+// v6.87.0：原「球员还原按合同类型」局部构造（母本残缺变体：缺 free 分支、缺 EXISTS 守卫）已删除，
+// 还原统一走 src/worker/player-ops.ts 的 restoreAfterListing（CASE 母本 + listingId null 透传）。
 
 export interface VoidSigningOpts {
   actor: number | null;
@@ -965,7 +957,9 @@ export async function voidSigningCore(env: Env, sessionId: number, opts: VoidSig
     db.prepare(`UPDATE bids SET status = 'withdrawn' WHERE listing_id = ? AND status = 'active'`).bind(listingId),
     // listingId 可能为 null（无关联挂牌）：原语句以 null 绑定即 no-op，这里同值透传（类型仅为编译期断言）
     advanceStatement(db, listingId as number, 'negotiation_closed', { deadlineNote: opts.deadlineNote }),
-    playerRestoreSql(db, transfer.player_id),
+    // v6.87.0 收编：listingId null（match 单/无挂牌单据）同值透传不加 EXISTS，免得恒假守卫吞掉还原；
+    // free 分支运行时不可达（signing 场景球员已过户买方且必有占位合同，transfers.ts:757），纯防御
+    restoreAfterListing(db, transfer.player_id, listingId),
     db.prepare(`UPDATE transfers SET status = 'rejected' WHERE id = ? AND status = 'signing'`).bind(transfer.id),
     audit({
       actor: opts.actor,
