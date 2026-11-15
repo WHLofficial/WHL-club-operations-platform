@@ -35,6 +35,7 @@ import { shuffleWithSeed, transferBoardBucket } from '../../core/ad-board.ts';
 import { rowDisplayName, sqlDisplayName } from '../../core/player-name.ts';
 import { settleOverdue } from '../market-settle.ts';
 import { advanceStatement } from '../listing-ops.ts';
+import { advanceStatement as advancePlayerStatement } from '../player-ops.ts';
 import { rollbackRcChangeForPlayer } from '../bypass.ts';
 import { listingDemandStatements } from '../demand-ops.ts';
 import { notifyShortlistWatchers } from '../shortlist.ts';
@@ -333,10 +334,8 @@ app.post('/market/listings', async (c) => {
       `INSERT INTO listings (player_id, seller_club_id, type, ask_price, status, listed_at, listed_day, deadline_at, season, window_seq)
        VALUES (?, ?, 'normal', ?, 'listed', ${nowSql()}, ?, ?, ?, ?)`,
     ).bind(playerId, club.id, round2(askPrice), listedDay, firstDeadline, win.season, win.windowSeq),
-    c.env.DB.prepare(`UPDATE players SET status = 'listed', updated_at = ${nowSql()} WHERE id = ? AND club_id = ? AND status = 'normal'`).bind(
-      playerId,
-      club.id,
-    ),
+    // players.status 写侧唯一入口（v6.87.0）：normal → listed，守卫（含 club 归属）在构造器内
+    advancePlayerStatement(c.env.DB, playerId, 'market_list', { playerId, clubId: club.id }),
     audit({
       actor: user.id,
       action: 'listing_create',

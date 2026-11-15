@@ -19,6 +19,7 @@ import { findActiveNegotiationSession } from './negotiation-guard.ts';
 import { availableBalance } from './ledger.ts';
 import { createAuditStatement } from '../lib/audit.ts';
 import { queueClubNotification } from './notify.ts';
+import { advanceStatement as advancePlayerStatement } from './player-ops.ts';
 
 function nowSql() {
   return `strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`;
@@ -259,9 +260,8 @@ export async function demotePlayer(env: Env, clubId: number, actor: number, play
          WHERE player_id = ? AND status = 'pending' AND ${settledGuard}`,
       )
       .bind(playerId),
-    db
-      .prepare(`UPDATE players SET status = 'trainee', updated_at = ${nowSql()} WHERE id = ? AND club_id = ? AND ${settledGuard}`)
-      .bind(playerId, clubId),
+    // players.status 写侧唯一入口（v6.87.0）：normal → trainee 下放，settledGuard 字符串透传不重写
+    advancePlayerStatement(db, playerId, 'demote', { playerId, clubId, settledGuard }),
   ]);
   if ((results[0]?.meta.changes ?? 0) === 0) {
     throw new HttpError(409, '球员状态刚发生变化，下放没有生效，请刷新后重试');

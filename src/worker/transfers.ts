@@ -27,7 +27,8 @@ import { voidDemandStatements } from './demand-ops.ts';
 import { queueAllUserClubsNotification } from './notify.ts';
 import { notifyShortlistWatchers } from './shortlist.ts';
 import { advanceStatement } from './listing-ops.ts';
-import { restoreAfterListing } from './player-ops.ts';
+import { advanceStatement as advancePlayerStatement, restoreAfterListing } from './player-ops.ts';
+import { resolveTarget } from '../core/player-state.ts';
 
 function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
@@ -367,13 +368,12 @@ export async function completeTransfer(
   /** A 分支的非直拒终局（谈崩/低还价/过期）：买回要计一次 expired 入新段（§5.4 第 2 条） */
   const returnCountFinal =
     pureReturn && returnDemand !== null && returnDemand.resolution !== 'direct' && (returnDemand.status === 'rejected' || returnDemand.status === 'expired');
-  const playerStatus = dealTerms
-    ? dealTerms.contractType === 'trainee'
-      ? 'trainee'
-      : 'normal'
-    : contract?.contract_type === 'trainee'
-      ? 'trainee'
-      : 'normal';
+  // status 目标由 core 转移表产出（v6.87.0）：dealTerms 优先、否则按现行合同类型，
+  // 与原三元逐值等价（'trainee' → trainee，formal/无合同 → normal）。
+  const playerStatus = resolveTarget('transfer_complete', {
+    dealTermsContractType: dealTerms?.contractType,
+    currentContractType: contract?.contract_type ?? null,
+  });
 
   const guard = { sql: `(SELECT status FROM transfers WHERE id = ?) IN ('pending_review', 'signing')`, params: [transferId] };
   const audit = createAuditStatement(db);
@@ -629,9 +629,8 @@ export async function completeTransfer(
           transfer.player_id,
           transfer.to_club_id,
         ),
-      db
-        .prepare(`UPDATE players SET status = 'normal', updated_at = ${nowSql()} WHERE id = ? AND status = 'trainee'`)
-        .bind(transfer.player_id),
+      // players.status 写侧唯一入口（v6.87.0）：trainee → normal 上调成约，守卫逐字收进构造器
+      advancePlayerStatement(db, transfer.player_id, 'promotion_complete', { playerId: transfer.player_id }),
       db
         .prepare(`UPDATE transfers SET extra_fee = ? WHERE id = ? AND ${guard.sql}`)
         .bind(surcharge, transferId, ...guard.params),
@@ -670,9 +669,8 @@ export async function completeTransfer(
         ),
     );
     statements.push(
-      db
-        .prepare(`UPDATE players SET status = 'normal', updated_at = ${nowSql()} WHERE id = ? AND status = 'trainee'`)
-        .bind(transfer.player_id),
+      // players.status 写侧唯一入口（v6.87.0）：match 条款恒 formal ⇒ trainee → normal，守卫逐字收进构造器
+      advancePlayerStatement(db, transfer.player_id, 'match_terms', { playerId: transfer.player_id }),
     );
   } else if (pureReturn && returnCtx !== null) {
     // A 分支（本窗已闹过涨薪）：跳过签约谈判、纯回归——工资 / RC / 合同类型按合同行**现值**带回
@@ -1081,9 +1079,9 @@ export async function applyContractTerms(
             WHERE player_id = ? AND is_active = 1 AND club_id = ? AND ${gate.sql}`,
         )
         .bind(terms.wage, terms.releaseFee, terms.source, baseTicks, terms.contractType, transfer.player_id, clubId, ...gate.params),
-      db
-        .prepare(`UPDATE players SET status = 'normal', updated_at = ${nowSql()} WHERE id = ? AND status = 'trainee'`)
-        .bind(transfer.player_id),
+      // players.status 写侧唯一入口（v6.87.0）：match 条款恒 formal ⇒ trainee → normal（与 completeTransfer
+      // match 分支同一构造器），守卫逐字收进构造器
+      advancePlayerStatement(db, transfer.player_id, 'match_terms', { playerId: transfer.player_id }),
     );
   } else {
     // 换队（transfer/activation/forced_auction）：合同已随人迁到买方（过户时的桥接分支），
@@ -1120,9 +1118,13 @@ export async function applyContractTerms(
   // 谈成训练营条款时在条款落地这一步翻回 trainee（反向：trainee 谈成正式 ⇒ 回一线队）。
   if (transfer.type !== 'rc_change' && transfer.type !== 'match') {
     statements.push(
-      db
-        .prepare(`UPDATE players SET status = ?, updated_at = ${nowSql()} WHERE id = ? AND club_id = ? AND status IN ('normal', 'trainee')`)
-        .bind(terms.contractType === 'trainee' ? 'trainee' : 'normal', transfer.player_id, clubId),
+      // players.status 写侧唯一入口（v6.87.0）：目标值由谈判条款决定，不挂 gate——幂等靠入口
+      // terms_applied 短路 + 同批合同语句带 gate（分层原样），守卫逐字收进构造器
+      advancePlayerStatement(db, transfer.player_id, 'transfer_terms', {
+        playerId: transfer.player_id,
+        clubId,
+        to: terms.contractType === 'trainee' ? 'trainee' : 'normal',
+      }),
     );
   }
   const audit = createAuditStatement(db);
@@ -1194,9 +1196,10 @@ export async function completeTermination(
     //（含被发放金抑制的银槽，金行随明细删除而回归）全额计入台账；只有发放所得清零。
     // v6.64.2：解约即离队，旧东家的挂牌设置一并清掉——transfer_listed 留着不清，广告板就会
     // 捞出「无东家的名单行」（clubName 为空，前端 TeamLogo 拿到 null 直接抛错白屏）。
+    // status 目标改由 core 转移表产出（v6.87.0）：terminate 是常量 'free'，SQL 执行文本不变。
     db
       .prepare(
-        `UPDATE players SET club_id = NULL, status = 'free', number = NULL, ca = COALESCE(base_ca, ca),
+        `UPDATE players SET club_id = NULL, status = '${resolveTarget('terminate')}', number = NULL, ca = COALESCE(base_ca, ca),
            growth_xp = 0, levels_applied = 0,
            transfer_listed = 0, list_price = NULL, min_offer_price = NULL, offer_auto = 0,
            not_for_sale = 0, transfer_listed_at = NULL,

@@ -19,7 +19,7 @@ import { queueClubNotification } from './notify.ts';
 import { sqlDisplayName } from '../core/player-name.ts';
 import { findActivePromotionSession } from './negotiation-guard.ts';
 import { advanceStatement } from './listing-ops.ts';
-import { restoreAfterListing } from './player-ops.ts';
+import { advanceStatement as advancePlayerStatement, restoreAfterListing } from './player-ops.ts';
 // 契约类型锚点（v6.82.0 第 6 批）：激活回执以 src/contract/batch6.ts 为唯一真源——本地同名
 // interface ActivationResult 删除定义改 import（ok 字面 true 与契约一致，甄别随批补甄别收窄）。
 // 匹配决定回执以 batch5.ts 的 MatchDecisionResult 为真源（第 5 批登记的锚点缺口在本批兑现；
@@ -119,9 +119,8 @@ export async function createActivation(
   const deadline = new Date(listedAt.getTime() + ctx.activationWindowMin * 60_000);
   const audit = createAuditStatement(db);
   const statements = [
-    db
-      .prepare(`UPDATE players SET status = 'listed', updated_at = ${nowSql()} WHERE id = ? AND club_id = ? AND status IN ('normal', 'trainee')`)
-      .bind(playerId, player.club_id),
+    // players.status 写侧唯一入口（v6.87.0）：唯一允许 trainee 起点的 listed 化写点，守卫逐字收进构造器
+    advancePlayerStatement(db, playerId, 'activation_list', { playerId, clubId: player.club_id }),
     db
       .prepare(
         `INSERT INTO listings (player_id, seller_club_id, type, ask_price, status, listed_at, listed_day, activated_by, activation_deadline, season, window_seq, activation_proof)

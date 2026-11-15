@@ -15,6 +15,7 @@ import { protectionTicksFor } from '../core/bypass-rules.ts';
 import { windowBaseTicks } from './contract-ticks.ts';
 import { rowDisplayName } from '../core/player-name.ts';
 import { hookTierRecompute } from './growth-tier.ts';
+import { advanceStatement as advancePlayerStatement } from './player-ops.ts';
 
 const CHUNK_ROWS = 200; // 每 db.batch 一个事务批次
 
@@ -189,12 +190,13 @@ export async function previewContractsImport(env: Env, body: unknown) {
 // 这里按刚写入的合同类型把状态的**同向不一致**掰回来，只碰 normal/trainee 两态，不碰挂牌等状态。
 function syncPlayerStatusStatement(db: D1Database, c: Classified): D1PreparedStatement {
   const trainee = c.contract.contractType === 'trainee';
-  return db
-    .prepare(
-      `UPDATE players SET status = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ? AND status = ?`,
-    )
-    .bind(trainee ? 'trainee' : 'normal', c.playerId, trainee ? 'normal' : 'trainee');
+  // players.status 写侧唯一入口（v6.87.0）：import_sync 收进构造器——反向自限（守卫 status = from）
+  // 保持原语义：目标≠现态才生效，同向不一致才掰正，不碰挂牌等状态。
+  return advancePlayerStatement(db, c.playerId, 'import_sync', {
+    playerId: c.playerId,
+    to: trainee ? 'trainee' : 'normal',
+    from: trainee ? 'normal' : 'trainee',
+  });
 }
 
 function upsertContractStatement(

@@ -39,6 +39,7 @@ import { listingDemandStatements } from './demand-ops.ts';
 import { ensureNotInFlight, flowState, seaVerdicts } from './player-flow-state.ts';
 import { rowDisplayName } from '../core/player-name.ts';
 import { advanceStatement } from './listing-ops.ts';
+import { advanceStatement as advancePlayerStatement } from './player-ops.ts';
 
 function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
@@ -748,14 +749,9 @@ export async function createForcedAuction(
     minOffsetDays: 2,
   }).deadlineAt;
   // v6.60.5：自由身也能强拍——seller_club_id 留空，成交时 completeTransfer 按无收款人销毁成交款。
-  const markListed =
-    clubId === null
-      ? db
-          .prepare(`UPDATE players SET status = 'listed', updated_at = ${nowSql()} WHERE id = ? AND club_id IS NULL AND status = 'free'`)
-          .bind(playerId)
-      : db
-          .prepare(`UPDATE players SET status = 'listed', updated_at = ${nowSql()} WHERE id = ? AND club_id = ? AND status = 'normal'`)
-          .bind(playerId, clubId);
+  // players.status 写侧唯一入口（v6.87.0）：双分支收进 forced_auction_list 构造器——
+  // clubId=null 吃 free / 非 null 吃 normal，两分支守卫逐字同原三元。
+  const markListed = advancePlayerStatement(db, playerId, 'forced_auction_list', { playerId, clubId });
   const statements = [
     markListed,
     db
@@ -827,13 +823,12 @@ export async function cancelForcedAuction(env: Env, actor: number, listingIdInpu
   }
 
   const audit = createAuditStatement(db);
-  const restorePlayer = freeAgentListing
-    ? db
-        .prepare(`UPDATE players SET status = 'free', updated_at = ${nowSql()} WHERE id = ? AND club_id IS NULL AND status = 'listed'`)
-        .bind(listing.player_id)
-    : db
-        .prepare(`UPDATE players SET status = 'normal', updated_at = ${nowSql()} WHERE id = ? AND club_id = ? AND status = 'listed'`)
-        .bind(listing.player_id, listing.seller_club_id);
+  // players.status 写侧唯一入口（v6.87.0）：双分支收进 forced_auction_cancel 构造器——
+  // 自由身单还原 free / 在册单还原 normal（还原目标由 seller_club_id 是否 null 选定），守卫逐字同原三元。
+  const restorePlayer = advancePlayerStatement(db, listing.player_id, 'forced_auction_cancel', {
+    playerId: listing.player_id,
+    sellerClubId: listing.seller_club_id,
+  });
   await db.batch([
     advanceStatement(db, listingId, 'forced_cancel', {}),
     restorePlayer,

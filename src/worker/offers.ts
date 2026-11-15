@@ -28,6 +28,7 @@ import { sqlDisplayName } from '../core/player-name.ts';
 import { rollbackRcChangeForPlayer } from './bypass.ts';
 import { ACTIVE_LISTING_STATES_SQL } from './player-flow-state.ts';
 import { loadMarketContext } from './market-context.ts';
+import { advanceStatement as advancePlayerStatement } from './player-ops.ts';
 // 契约类型锚点（v6.82.0 第 5 批）：报价设置与五个动作回执以 src/contract/batch5.ts 为唯一真源，
 // placeOffer / counterOffer / acceptOffer / rejectOffer / withdrawOffer / setOfferSettings 的
 // return 标注即写侧编译期锁。placeOffer 本体不含 ok（路由层补包装），故标 Omit<OfferPlaceResult,'ok'>。
@@ -463,9 +464,11 @@ async function fulfillAcceptedOffer(env: Env, offerId: number, actor: number | n
       .bind(listedDay, listingDeadline, offerId),
     // players 的 listed 化必须排在 INSERT 之后：守卫要求 status='normal'，同批内先改后查必然 0 行；
     // not_for_sale = 0 与 INSERT 的守卫对齐——INSERT 因非卖品失败时不得把球员翻转成 listed
-    db
-      .prepare(`UPDATE players SET status = 'listed', updated_at = ${nowSql()} WHERE id = ? AND club_id = ? AND status = 'normal' AND not_for_sale = 0`)
-      .bind(offer.player_id, offer.seller_club_id),
+    // players.status 写侧唯一入口（v6.87.0）：守卫逐字收进构造器，本句批内下标 [1] 不变
+    advancePlayerStatement(db, offer.player_id, 'offer_accepted_list', {
+      playerId: offer.player_id,
+      sellerClubId: offer.seller_club_id,
+    }),
     db
       .prepare(
         `UPDATE fund_holds SET ref_type = 'listing', ref_id = last_insert_rowid()
