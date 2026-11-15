@@ -138,17 +138,49 @@
 
 **判级与缘起**：patch 等价 + 三处定向修复——18 处字面 `UPDATE players SET status` 写点（9 文件，2026-11-16 基线 grep 实测）收编为 `src/worker/player-ops.ts` 唯一入口 + `src/core/player-state.ts` 纯转移表 / resolveTarget（镜像 v6.83.0 listing 双件套分层：core = 语义真源零 IO、worker = SQL 构造器）。10 个 pure cause 的 SQL 文本、批内下标、批序契约、changes 后验逐字不变；行为变化仅限 B1/B2/B3 三处同源潜伏 bug 修正（见 Fixed）+ 两处运行时不可达的防御 free 分支 + 还原句新增 EXISTS delisted 守卫（delistUnbid P1-1 同款防幻影）。零迁移、零生产写、零 UI、零新增端点。例外 3 cause 登记不收编：revert_snapshot（快照驱动、零守卫、信任批外三闸）/ admin_set（动态白名单列拼接，retired 唯一写通道）/ retire（无生命周期写点，I4 后台手工态）。
 
-**交付**（三枚提交 `1b96dd6` feat 转移表与入口 / `99732f9` refactor 10 个 pure 写点迁移 / `12f0bf0` test 源码锁；评审修复轮另追加未提交改动）：
+**交付**（四枚提交：批 1 `1b96dd6` feat 转移表与入口 + 批 2 `99732f9` refactor pure 写点迁移 + 锁 `12f0bf0` test 源码锁 + 评审修复 `8ee8af8` fix；批次文件清单按 `git show --stat` 实测）：
+- **批 1（`1b96dd6`，12 文件）**：`src/core/player-state.ts`、`src/worker/player-ops.ts`、`src/worker/market-settle.ts`、`src/worker/market-intervene.ts`、`src/worker/negotiations.ts`、`src/worker/transfers.ts`、`src/worker/activations.ts`、`tests/player-state.test.ts`、`tests/activation-match.test.ts`、`tests/market-routes.test.ts`、`package.json`、`AGENTS.md`——B1/B2/B3 红测先行与修复随批 1 落地。
+- **批 2（`99732f9`，7 文件）**：`src/worker/routes/market.ts`、`src/worker/offers.ts`、`src/worker/activations.ts`、`src/worker/bypass.ts`、`src/worker/promotion.ts`、`src/worker/transfers.ts`、`src/worker/contracts-import.ts`——10 个 pure cause 写点全部迁移至唯一入口。
+- **锁（`12f0bf0`，1 文件）**：`tests/player-source-lock.test.ts`（191 行）。
+- **评审修复（`8ee8af8`，6 文件）**：`tests/player-state.test.ts`（+14 例）、`src/core/player-state.ts`（TransferCompleteCtx JSDoc 文档化）、`AGENTS.md`、`CHANGELOG.md`、`ROADMAP.md`、`docs/test-plans/v6.87.0-player-ops-state.md`。
 - `src/core/player-state.ts`：PlayerStatus 五值词汇表、PLAYER_PURE_CAUSES(10) / PLAYER_RESTORE_CAUSES(6) / PLAYER_TRANSITIONS(18 键)、resolveTarget（terminate 恒 free；transfer_complete dealTerms 优先、否则现行合同；还原类 club_id 优先于合同判定——母本 `market-settle.ts:184-190` 同判据）。
 - `src/worker/player-ops.ts`：`advanceStatement(db, playerId, cause, params)` 单条语句构造器（批内下标不容平移）/ `advance` / `restoreAfterListing`（listingId=null 透传不加 EXISTS）/ `restoreAfterNegotiation`（无守卫等价形态）；13 条 SQL 写点 + 1 处头注释同串，全仓唯一命中。
-- 九文件调用点收编（routes/market、offers、activations、bypass、market-settle、negotiations、promotion、transfers、contracts-import）；4 个与 listing-ops 重名符号的文件统一别名。
-- 测试：`tests/player-state.test.ts`（批 1：转移矩阵 81 执行 / 21 合法格、还原上下文六组合 + EXISTS 三态 + CASE 文本锁、resolveTarget 直测，11 例；批 2 补齐：TC-ORD-02 十二站点批内下标锁 + TC-CMP-01/02 compound 整行断言，Proxy 包 env.DB 记录批内 sqlText，14 例）+ `tests/player-source-lock.test.ts`（写点唯一性 + 21 cause 台账 + 例外写点在场锁，9 例）+ 既有域三处红测（B1 → activation-match、B2/B3 → market-routes）。
+- 九文件调用点收编（routes/market、offers、activations、bypass、market-settle、negotiations、promotion、transfers、contracts-import）：10 个 pure cause 写点全部改走 `advancePlayerStatement`（收编后调用点 11 处——match_terms 两处共用同一构造器，forced_auction_list / forced_auction_cancel 原 :754/:757 与 :832/:835 三元各收编为单调用点）+ 还原 6 写点全部走 `restoreAfterListing`（`playerRestoreSql` 本体删除）+ compound 2 处仅 status 目标值改走 `resolveTarget`；统一别名 `import { advanceStatement as advancePlayerStatement } from './player-ops.ts'` 7 文件全文一致（其中 routes/market / activations / bypass / transfers 4 文件与 listing-ops 同名符号并存、别名消歧必需），listing-ops 现存调用点 11 处不受影响。
+- 测试：`tests/player-state.test.ts`（批 1：转移矩阵 81 执行 / 21 合法格、还原上下文六组合 + EXISTS 三态 + CASE 文本锁、resolveTarget 直测，11 例；评审修复轮补齐：TC-ORD-02 十二站点批内下标锁 + TC-CMP-01/02 compound 整行断言，Proxy 包 env.DB 记录批内 sqlText，+14 例）+ `tests/player-source-lock.test.ts`（写点唯一性 + 21 cause 台账 + 例外写点在场锁，9 例）+ 既有域三处红测（B1 → activation-match、B2/B3 → market-routes）。
+
+**21 cause 收编表**（行号为收编后调用点，2026-11-16 收口 grep 复核实测；守卫 / params / 批内下标 / 后验全表见测试计划 §1.1）：
+
+| # | cause | kind | 转移（from → to） | 收编后落点 |
+| --- | --- | --- | --- | --- |
+| 1 | `market_list` | pure | normal → listed | `routes/market.ts:338` |
+| 2 | `offer_accepted_list` | pure | normal → listed（not_for_sale=0） | `offers.ts:468` |
+| 3 | `activation_list` | pure | normal\|trainee → listed | `activations.ts:123` |
+| 4 | `forced_auction_list` | pure | free\|normal → listed（clubId 双分支） | `bypass.ts:754` |
+| 5 | `forced_auction_cancel` | pure | listed → free\|normal（双分支） | `bypass.ts:828` |
+| 6 | `listing_expire_unbid` | restore | listed → CASE 三分支（母本） | `market-settle.ts:183`（delistUnbid） |
+| 7 | `activation_price_expired` | restore | listed → CASE（补 free，防御） | `market-settle.ts:278` |
+| 8 | `demote` | pure | normal → trainee（settledGuard 字符串透传） | `promotion.ts:264` |
+| 9 | `promotion_complete` | pure | trainee → normal | `transfers.ts:633` |
+| 10 | `match_terms` | pure | trainee → normal（同一构造器两调用点） | `transfers.ts:673` / `:1084` |
+| 11 | `transfer_terms` | pure | normal\|trainee → to 参数（不挂 gate） | `transfers.ts:1123` |
+| 12 | `import_sync` | pure | normal\|trainee → to（反向自限） | `contracts-import.ts:195` |
+| 13 | `admin_void_restore` | restore | listed → CASE（**B2**：自由身强拍作废还原 free + EXISTS 守卫） | `market-intervene.ts:96` |
+| 14 | `negotiation_void_restore` | restore | listed → CASE（补 free 防御；listingId=null 透传不加 EXISTS） | `negotiations.ts:962` |
+| 15 | `review_reject_restore` | restore | listed → CASE（**B3**：驳回还原 free；删 JS 合同预读，少一次 D1 SELECT） | `transfers.ts:1295` |
+| 16 | `activation_matched_kept` | restore | listed → CASE（**B1**：按合同还原 trainee，原固定 normal） | `activations.ts:299` |
+| 17 | `transfer_complete` | compound | 无 status 守卫（归属闸）→ `resolveTarget('transfer_complete', ctx)` | `transfers.ts:373` + `:486` |
+| 18 | `terminate` | compound | 无 status 守卫（club_id 闸）→ `resolveTarget('terminate')` 恒 free | `transfers.ts:1202` |
+| 19 | `revert_snapshot` | **例外登记** | 快照 JSON 的 club_id+status 两列、零守卫、信任批外三闸 | `deal-revert.ts:114`（不收编） |
+| 20 | `admin_set` | **例外登记** | 动态白名单列拼接、status 可与 club_id 矛盾（有意设计）、retired 唯一写通道 | `routes/admin/players.ts:135` / `:220`（不收编） |
+| 21 | `retire` | **例外登记** | 无生命周期写点（grep 证实 retired 仅读侧），I4 后台手工态 | 无写点（唯一通道 = admin_set） |
+
+**运行时零变化自查（施工轮逐条比对 + 收口复核）**：12 条 builder SQL 与原句逐字一致（nowSql 同串；import_sync 原跨行模板收单行，SQLite 语义等价、执行计划相同）；各写点 bind 序逐一比对一致；全部后验判据 / 批序契约原位（offers INSERT 在前、demote INSERT 在前、EXISTS 同批可见链）；未新增 as/any/@ts-ignore/非空断言（import 别名 as 非类型断言）；compound 2 处九列 / 十二列 SET 原样（terminate 的 status 字面量改内插 `resolveTarget('terminate')` 恒 free ⇒ 运行时 SQL 文本逐字不变）。
 
 **评审修复（第 1 轮，5 条全处置）**：① §3 承诺 32 例中 TC-ORD/CMP/PRM/SRC-03/04 未随批 1 交付且无偏差登记（medium）——按 fixHint「最小补齐」补 TC-ORD-02 + TC-CMP-01/02 共 14 例，剩余 TC 清单与落点登记进测试计划 §8 条目 10；② AGENTS.md:66 括注「pure 类写点迁移随后续批补齐」与 `99732f9` 交付事实矛盾——订正为「18 收编 cause 全部经此入口」；③ 测试计划 §4 M1 变异预期不准——修复轮重放 M1 实测恰红 4 例（TC-CTX-01/03 + TC-RED-B2/B3；TC-MX-01 因矩阵还原格固定「有归属 + formal 合同」不红，属预期内盲区），订正进计划 §4 M1 行；④ `resolveTarget('transfer_complete')` 对「属性在场但值为 undefined」回落现行合同、与「dealTerms 优先」字面读法有暗坑——按 fixHint 第二式在 `TransferCompleteCtx` JSDoc 文档化（唯一调用点 `ContractTerms.contractType` 非可选，`transfers.ts:94`，分歧现状不可达、逐值等价），实现语义不变；⑤ 测试文件名与计划不一致（`player-ops-state` → `player-state`、`player-ops-source-lock` → `player-source-lock`）补进计划 §8 条目 9 + 本节与 CHANGELOG 补 v6.87.0 条目。
 
-**验收**：typecheck 三份全清；vitest **216 文件 / 3338 例**全绿（批 1 交付时 216/3324，评审修复 +14 例）；变异——批 1 收口实测 M1 4 红 / M2 3 红（M1 修复轮重放复核一致）；修复轮新锁 M-A（adminForceVoid 还原句平移到批内 [1]）恰红站点例⑩、M-B（`resolveTarget('terminate')` 改 normal）恰红 TC-CMP-02 + TC-GRD-02，弄坏即还原、还原后全绿；`tests/player-state.test.ts` 25/25、`tests/player-source-lock.test.ts` 9/9。测试计划 `docs/test-plans/v6.87.0-player-ops-state.md`（§8 偏差登记 10 条 + §10 评审修复记录）。**未 push**（HEAD `12f0bf0` + 评审修复未提交改动）；e2e 与生产回读不在本轮（运行时增量面仅三处 Fixed，部署随下一次授权 push）。
+**验收**：typecheck 三份全清（施工轮口径；收口复核自跑 `node node_modules/typescript/bin/tsc -p tsconfig.worker.json --noEmit` exit 0）；vitest 批 1 收口移交实测 **216 文件 / 3324 例（1 failed / 3323 passed，失败文件未随移交输出；评审 finding 1 记「全套绿」口径并存）**——评审修复 +14 例后的全套复跑未随移交、收口未复跑全套（全套由脚本统一跑）；变异逐式——施工轮六式（移交实测）：M1 删 PLAYER_TRANSITIONS market_list 行 → 红 1 例（TC-MX-03 表驱动锁，其余 10 例 SQL 行为面保持绿）；M3 删 resolveTarget free 分支（= 计划 §4 M1）→ 红 2 例（TC-CTX-01 + TC-GRD-02，红点精确落 free 分支）；M4 player-ops market_list 构造器删 status 守卫 → 红 5 例（TC-MX-01/02、TC-MX-04、TC-MX-06、TC-MX-07、TC-GRD-01；TC-MX-05 不存在 id 保持绿）；M5 transfers.ts 内插裸写（构造即弃）→ 源码锁红 2 例（两道独立锁各自翻红）+ worker tsc 绿（= 计划 §4 M6）；M2 / M6 resolveTarget 加 promotion_complete / transfer_terms 分支 → 未命中（grep 证实 resolveTarget 定义域不含 pure cause、分支为运行时死代码——pure cause 目标态防线在转移表 TC-MX-03 与 SQL 构造器 TC-GRD-01/MX 两层）；六式均弄坏即还原、还原后全绿。修复轮重放计划 §4 M1 恰红 4 例（TC-CTX-01/03 + TC-RED-B2/B3）/ M2 3 红（评审移交口径「变异 M1/M2 实测 4红/3红」）；修复轮新锁 M-A（adminForceVoid 还原句平移到批内 [1]）恰红站点例⑩、M-B（`resolveTarget('terminate')` 改 normal）恰红 TC-CMP-02 + TC-GRD-02。红测先行 B1/B2/B3：改码前 `npx vitest run tests/activation-match.test.ts tests/market-routes.test.ts` 实测 3 failed（各一，红的都是 status 断言本身）+ 53 既有用例保持绿，修复后同命令 56/56 全绿（收口复核复跑：activation-match 12 + market-routes 44 = 56，`tests/player-state.test.ts` 25/25、`tests/player-source-lock.test.ts` 9/9，四文件合计 90 例全绿）；判据 grep 收口复核：src 下 `UPDATE players SET status` 仅剩 player-ops.ts 14 处命中、原 9 文件归零。测试计划 `docs/test-plans/v6.87.0-player-ops-state.md`（§8 偏差登记 10 条 + §10 评审修复记录 + 末尾「实际交付对照」）。**未 push**（HEAD `8ee8af8`）；e2e 与生产回读不在本轮（运行时增量面仅三处 Fixed，部署随下一次授权 push）。
 
-**待办（后续批）**：TC-ORD-01/03/04、TC-CMP-03/04/05、TC-PRM-01..04、TC-SRC-03/04（清单与落点见测试计划 §8 条目 10）；生产存量幽灵行（B1 错位 / B2/B3 幽灵 normal）规模未探——存量订正需单独授权的只读探针 + 数据批。
+**待办（后续批）**：TC-ORD-01/03/04、TC-CMP-03/04/05、TC-PRM-01..04、TC-SRC-03/04（清单与落点见测试计划 §8 条目 10；其中 TC-CMP-03/04 的语句形态在场断言已由 `tests/player-source-lock.test.ts` 例外写点锁先行覆盖）；盘点缺口 N1–N8 不在本批施工范围——N1（transfer_complete 换队落 trainee 断言）已随修复轮 TC-CMP-01 顺带钉住，N3/N4（admin_set 枚举负例与逃生口行为锚）归 admin_set 例外域另行处理，其余登记后续批；生产存量幽灵行（B1 错位 / B2/B3 幽灵 normal）规模未探——存量订正需单独授权的只读探针 + 数据批；`src/core/player-state.ts` 与 `src/core/listing-state.ts` 并列独立、两表不合并（listings 状态机 v6.83.0 已收口，12 cause 不动）；resolveTarget 扩域到 pure cause 的假想重构无对应锁（施工轮 M2/M6 未命中实证），届时需先补锁再动。
 
 ## v6.86.0 · worker 响应锚点收口（contract anchor closeout，type-only）（2026-11-15，已上线 Version aa1a7e04）
 

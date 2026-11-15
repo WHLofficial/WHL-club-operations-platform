@@ -10,12 +10,13 @@
 
 - `src/core/player-state.ts`：players.status 转移表（10 pure + 6 restore + 2 compound = 18 收编 cause）与 `resolveTarget` 纯函数——零 IO 语义真源；还原判据 club_id 优先于合同判定，与母本 `market-settle.ts:184-190` 同源。
 - `src/worker/player-ops.ts`：`advanceStatement(db, playerId, cause, params)` 单条语句构造器 + `advance` + `restoreAfterListing`（listingId=null 透传不加 EXISTS）/ `restoreAfterNegotiation`——全仓唯一 `UPDATE players SET status` 写侧（源码锁 13 条 SQL 写点 + 1 处头注释同串，命中全在本文件）。
-- `tests/player-state.test.ts`（转移矩阵 81 执行 / 21 合法格 + 还原上下文 + resolveTarget 直测，11 例；批 2 补齐 TC-ORD-02 十二站点批内下标锁 + TC-CMP-01/02 compound 整行断言，14 例）与 `tests/player-source-lock.test.ts`（写点唯一性 + 21 cause 台账 + 例外写点在场锁，9 例）。
+- `tests/player-state.test.ts`（转移矩阵 81 执行 / 21 合法格 + 还原上下文 + resolveTarget 直测，11 例；评审修复轮补齐 TC-ORD-02 十二站点批内下标锁 + TC-CMP-01/02 compound 整行断言，+14 例）与 `tests/player-source-lock.test.ts`（写点唯一性 + 21 cause 台账 + 例外写点在场锁，9 例）。
+- AGENTS.md 代码与提交节新增 players.status 唯一写侧规则：「players.status 一律走 `src/worker/player-ops.ts` 的 advance/advanceStatement（还原走 restoreAfterListing/restoreAfterNegotiation），禁止裸写 UPDATE players SET status」；package.json → 6.87.0。
 
 **Changed**
 
-- 9 文件 18 处字面 `UPDATE players SET status` 写点全部改走 player-ops 构造器：除下列 Fixed 三处外 SQL 文本、批内下标、批序契约、changes 后验逐字不变；例外 3 cause（revert_snapshot / admin_set / retire）登记不收编。
-- AGENTS.md 状态行订正：「players.status 一律走 player-ops（v6.87.0 起，18 收编 cause 全部经此入口）」。
+- players.status 21 cause 收口到 `src/core/player-state.ts` + `src/worker/player-ops.ts`：9 文件 18 处字面 `UPDATE players SET status` 写点（2026-11-16 基线 grep 实测）全部改走 player-ops 构造器、原 9 文件归零（收口复核 grep：src 下命中仅剩 player-ops.ts 14 处 = 13 条 SQL 写点 + 1 头注释同串）；还原统一 CASE（club_id IS NULL→free / active trainee 合同→trainee / 否则 normal）+ 挂牌还原 EXISTS delisted 守卫；除下列 Fixed 三处外 SQL 文本、批内下标、批序契约、changes 后验逐字不变；例外 3 cause（revert_snapshot / admin_set / retire）登记不收编。
+- AGENTS.md 括注订正（评审第 1 轮）：原括注「pure 类写点迁移随后续批补齐」与 `99732f9` 全部迁移事实矛盾，改为「v6.87.0 起，18 收编 cause 全部经此入口」。
 
 **Fixed**
 
@@ -26,7 +27,7 @@
 **Verification**
 
 - 零迁移、零生产写、零新增端点；除三处 Fixed 外运行时零变化。
-- typecheck 三份清；vitest **216 文件 / 3338 例**全绿（批 1 交付时 216/3324，评审修复 +14 例）；变异批 1 实测 M1 4 红 / M2 3 红、修复轮新锁 M-A/M-B 各恰红后还原全绿；测试计划 `docs/test-plans/v6.87.0-player-ops-state.md`（§8 偏差 10 条 + §10 评审修复记录）。
+- typecheck 三份清（施工轮口径；收口复核自跑 worker tsc exit 0）；vitest 批 1 收口移交实测 **216 文件 / 3324 例（1 failed / 3323 passed）**——失败文件未随移交输出、评审 finding 1 记「全套绿」口径并存，评审修复 +14 例后的全套复跑未随移交、收口未复跑全套；变异逐式见 ROADMAP v6.87.0 节验收（施工轮 M1–M6：M1/M3/M4/M5 各按预期红、M2/M6 死代码未命中；修复轮重放 M1 4 红 / M2 3 红 + 新锁 M-A/M-B 各恰红后还原全绿）；红测先行 B1/B2/B3 改码前 3 failed → 修复后 56/56；测试计划 `docs/test-plans/v6.87.0-player-ops-state.md`（§8 偏差 10 条 + §10 评审修复记录 + 末尾「实际交付对照」）。
 - 未 push；评审第 1 轮 5 条 finding 全处置（ROADMAP v6.87.0 节）。
 
 ## [v6.86.0] · worker 响应锚点收口（contract anchor closeout，type-only）（2026-11-15，已上线 Version aa1a7e04）
