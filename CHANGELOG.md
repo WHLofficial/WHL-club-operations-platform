@@ -4,7 +4,7 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
-## [v6.86.0] · worker 响应锚点收口（contract anchor closeout，type-only）（2026-11-15，未 push）
+## [v6.86.0] · worker 响应锚点收口（contract anchor closeout，type-only）（2026-11-15，已上线 Version aa1a7e04）
 
 **Changed**
 
