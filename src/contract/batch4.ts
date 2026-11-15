@@ -538,6 +538,13 @@ export interface ConfirmResultResult {
   xp: { granted: number; unresolved: string[] };
 }
 
+/** 钩子重放回执（POST /api/admin/results/:id/replay-hooks，201；§6.8 漏审补录同族）。
+ *  worker 恒 ok:true ⇒ 收窄字面（BindTournamentResult / ConfirmResultResult 同口径）。 */
+export interface ReplayHooksResult {
+  ok: true;
+  result: ConfirmedResultRow;
+}
+
 // ---------------------------------------------------------------------------
 // 窗口（GET/POST /api/admin/windows*；状态机 window-machine.ts + 看板 squad-audit.ts）
 // ---------------------------------------------------------------------------

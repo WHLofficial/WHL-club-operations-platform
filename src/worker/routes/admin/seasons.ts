@@ -6,6 +6,7 @@ import { Hono } from 'hono';
 import type {
   BindTournamentResult,
   ConfirmResultResult,
+  ReplayHooksResult,
   ResultsQueue,
   SeasonBindingsResponse,
   SeasonsResponse,
@@ -201,7 +202,7 @@ app.post('/results/:id/confirm', async (c) => {
 app.post('/results/:id/replay-hooks', async (c) => {
   await requireAdmin(c.env, c.req.raw);
   const result = await replayHooksForMatch(c.env, c.req.param('id'));
-  return c.json({ ok: true, result }, 201);
+  return c.json<ReplayHooksResult>({ ok: true, result }, 201);
 });
 
 export default app;

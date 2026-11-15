@@ -230,6 +230,7 @@ export type {
   BindTournamentResult,
   ConfirmedResultRow,
   ConfirmResultResult,
+  ReplayHooksResult,
   MyClubOverview,
   OpeningImportResult,
   OpsEndAnchor,

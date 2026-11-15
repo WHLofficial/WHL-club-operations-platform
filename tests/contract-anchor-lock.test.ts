@@ -27,7 +27,7 @@ function typoOf(s: string): string {
   return mutated;
 }
 
-/** 施工表涉及的全部 worker 文件（相对仓库根） */
+/** 施工表涉及的全部受锁文件（worker + web 消费侧，相对仓库根） */
 const FILES = {
   negotiations: 'src/worker/negotiations.ts',
   negotiationsRoutes: 'src/worker/routes/negotiations.ts',
@@ -37,10 +37,15 @@ const FILES = {
   registration: 'src/worker/routes/registration.ts',
   seaSealed: 'src/worker/routes/admin/sea-sealed.ts',
   players: 'src/worker/routes/players.ts',
+  seasonsRoutes: 'src/worker/routes/admin/seasons.ts',
+  webApi: 'web/src/lib/api.ts',
+  seasonsPage: 'web/src/pages/admin/SeasonsPage.tsx',
+  playerPage: 'web/src/pages/Player.tsx',
+  negotiationsSection: 'web/src/pages/market/desk/NegotiationsSection.tsx',
 } as const;
 
 describe('施工表路径自检', () => {
-  it('8 个受锁文件全部可读且非空（防路径写错把锁扫空）', () => {
+  it('13 个受锁文件全部可读且非空（防路径写错把锁扫空）', () => {
     const paths = Object.values(FILES);
     expect(paths.length).toBeGreaterThan(0);
     for (const f of paths) {
@@ -135,6 +140,24 @@ describe('results 契约锚点锁', () => {
     );
     expect(text, '本地 interface ConfirmedResultItem 必须退役（契约名 ConfirmedResultRow）').not.toContain(
       'interface ConfirmedResultItem',
+    );
+
+    // spec ①（v6.86.0）：replay-hooks 回执建模——seasons.ts 路由泛型 + 契约 import 在场；
+    // 防假绿计数只锁新锚恰 1 处（seasons 端点集在增长，全文件 return c.json< 总数登记不锁，
+    // 测试计划 §8.10：施工前 9 处 / 施工后 10 处，全量锁每加一个泛型端点即碎）
+    const seasons = src(FILES.seasonsRoutes);
+    expect(seasons, 'seasons:ReplayHooksResult replay-hooks 回执泛型').toContain(
+      'return c.json<ReplayHooksResult>({ ok: true, result }, 201);',
+    );
+    expect(seasons, 'seasons:ReplayHooksResult 契约 import').toContain('ReplayHooksResult,');
+    expect(seasons.match(/c\.json<ReplayHooksResult>/g) ?? [], 'ReplayHooksResult 泛型应为 1 处').toHaveLength(1);
+    // web 消费侧（TC-RH-03）：re-export 必经 api.ts（紧随 ConfirmResultResult 补登）+
+    // SeasonsPage 调用点零改动（apiPost<{ ok: true }> 不读 result，正向在场锁）
+    expect(src(FILES.webApi), 'web api:ReplayHooksResult 紧随 ConfirmResultResult 补登').toContain(
+      'ConfirmResultResult, ReplayHooksResult,',
+    );
+    expect(src(FILES.seasonsPage), 'SeasonsPage replay-hooks 调用点零改动').toContain(
+      'await apiPost<{ ok: true }>(`/api/admin/results/${matchId}/replay-hooks`, {});',
     );
   });
 });
@@ -263,6 +286,16 @@ describe('锁判据自检（错一个字必须不匹配，防恒真）', () => {
         file: FILES.results,
         expected: 'const queue: (ResultQueueRow & { _sortKey: string })[] = pending.map(({ m, season, competitionType }) => ({',
         label: 'results 排序中间行类型',
+      },
+      {
+        file: FILES.seasonsRoutes,
+        expected: 'return c.json<ReplayHooksResult>({ ok: true, result }, 201);',
+        label: 'seasons replay-hooks 泛型',
+      },
+      {
+        file: FILES.seasonsRoutes,
+        expected: 'ReplayHooksResult,',
+        label: 'seasons ReplayHooksResult import',
       },
       {
         file: FILES.growthTier,
