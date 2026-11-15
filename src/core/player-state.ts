@@ -66,8 +66,14 @@ export interface PlayerRestoreCtx {
   contractType: string | null;
 }
 
-// transfer_complete 上下文（transfers.ts:369-375 三元等价）：dealTermsContractType 缺省
-//（undefined）= A 分支无成约条款，按现行合同判定；currentContractType = 现行合同类型（无合同 null）。
+// transfer_complete 上下文（transfers.ts:369-375 三元等价）：dealTermsContractType = undefined
+//（缺省与「属性在场但显式传 undefined」同判）= 无成约条款，回落现行合同判定；
+// currentContractType = 现行合同类型（无合同 null）。
+// 与原三元的语义边界：原版以 dealTerms **对象**真值为界（对象在场而 contractType 为 undefined
+// 时恒 'normal'），本函数以 dealTermsContractType **属性值**是否 undefined 为界（回落现行合同）。
+// 唯一调用点 transfers.ts（completeTransfer）传的是 ContractTerms.contractType（'trainee' |
+// 'formal' 非可选，transfers.ts:94），成约在场时值必有 ⇒ 该分歧现状不可达、逐值等价；将来新调用
+// 方若显式传 undefined，语义是「回落现行合同」而非恒 normal——按此文档化口径使用。
 export interface TransferCompleteCtx {
   dealTermsContractType?: 'trainee' | 'formal';
   currentContractType?: string | null;

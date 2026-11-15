@@ -134,6 +134,22 @@
 
 ---
 
+## v6.87.0 · players.status 写侧收编：转移表 + advanceStatement 唯一入口（2026-11-16，本地收口未 push）
+
+**判级与缘起**：patch 等价 + 三处定向修复——18 处字面 `UPDATE players SET status` 写点（9 文件，2026-11-16 基线 grep 实测）收编为 `src/worker/player-ops.ts` 唯一入口 + `src/core/player-state.ts` 纯转移表 / resolveTarget（镜像 v6.83.0 listing 双件套分层：core = 语义真源零 IO、worker = SQL 构造器）。10 个 pure cause 的 SQL 文本、批内下标、批序契约、changes 后验逐字不变；行为变化仅限 B1/B2/B3 三处同源潜伏 bug 修正（见 Fixed）+ 两处运行时不可达的防御 free 分支 + 还原句新增 EXISTS delisted 守卫（delistUnbid P1-1 同款防幻影）。零迁移、零生产写、零 UI、零新增端点。例外 3 cause 登记不收编：revert_snapshot（快照驱动、零守卫、信任批外三闸）/ admin_set（动态白名单列拼接，retired 唯一写通道）/ retire（无生命周期写点，I4 后台手工态）。
+
+**交付**（三枚提交 `1b96dd6` feat 转移表与入口 / `99732f9` refactor 10 个 pure 写点迁移 / `12f0bf0` test 源码锁；评审修复轮另追加未提交改动）：
+- `src/core/player-state.ts`：PlayerStatus 五值词汇表、PLAYER_PURE_CAUSES(10) / PLAYER_RESTORE_CAUSES(6) / PLAYER_TRANSITIONS(18 键)、resolveTarget（terminate 恒 free；transfer_complete dealTerms 优先、否则现行合同；还原类 club_id 优先于合同判定——母本 `market-settle.ts:184-190` 同判据）。
+- `src/worker/player-ops.ts`：`advanceStatement(db, playerId, cause, params)` 单条语句构造器（批内下标不容平移）/ `advance` / `restoreAfterListing`（listingId=null 透传不加 EXISTS）/ `restoreAfterNegotiation`（无守卫等价形态）；13 条 SQL 写点 + 1 处头注释同串，全仓唯一命中。
+- 九文件调用点收编（routes/market、offers、activations、bypass、market-settle、negotiations、promotion、transfers、contracts-import）；4 个与 listing-ops 重名符号的文件统一别名。
+- 测试：`tests/player-state.test.ts`（批 1：转移矩阵 81 执行 / 21 合法格、还原上下文六组合 + EXISTS 三态 + CASE 文本锁、resolveTarget 直测，11 例；批 2 补齐：TC-ORD-02 十二站点批内下标锁 + TC-CMP-01/02 compound 整行断言，Proxy 包 env.DB 记录批内 sqlText，14 例）+ `tests/player-source-lock.test.ts`（写点唯一性 + 21 cause 台账 + 例外写点在场锁，9 例）+ 既有域三处红测（B1 → activation-match、B2/B3 → market-routes）。
+
+**评审修复（第 1 轮，5 条全处置）**：① §3 承诺 32 例中 TC-ORD/CMP/PRM/SRC-03/04 未随批 1 交付且无偏差登记（medium）——按 fixHint「最小补齐」补 TC-ORD-02 + TC-CMP-01/02 共 14 例，剩余 TC 清单与落点登记进测试计划 §8 条目 10；② AGENTS.md:66 括注「pure 类写点迁移随后续批补齐」与 `99732f9` 交付事实矛盾——订正为「18 收编 cause 全部经此入口」；③ 测试计划 §4 M1 变异预期不准——修复轮重放 M1 实测恰红 4 例（TC-CTX-01/03 + TC-RED-B2/B3；TC-MX-01 因矩阵还原格固定「有归属 + formal 合同」不红，属预期内盲区），订正进计划 §4 M1 行；④ `resolveTarget('transfer_complete')` 对「属性在场但值为 undefined」回落现行合同、与「dealTerms 优先」字面读法有暗坑——按 fixHint 第二式在 `TransferCompleteCtx` JSDoc 文档化（唯一调用点 `ContractTerms.contractType` 非可选，`transfers.ts:94`，分歧现状不可达、逐值等价），实现语义不变；⑤ 测试文件名与计划不一致（`player-ops-state` → `player-state`、`player-ops-source-lock` → `player-source-lock`）补进计划 §8 条目 9 + 本节与 CHANGELOG 补 v6.87.0 条目。
+
+**验收**：typecheck 三份全清；vitest **216 文件 / 3338 例**全绿（批 1 交付时 216/3324，评审修复 +14 例）；变异——批 1 收口实测 M1 4 红 / M2 3 红（M1 修复轮重放复核一致）；修复轮新锁 M-A（adminForceVoid 还原句平移到批内 [1]）恰红站点例⑩、M-B（`resolveTarget('terminate')` 改 normal）恰红 TC-CMP-02 + TC-GRD-02，弄坏即还原、还原后全绿；`tests/player-state.test.ts` 25/25、`tests/player-source-lock.test.ts` 9/9。测试计划 `docs/test-plans/v6.87.0-player-ops-state.md`（§8 偏差登记 10 条 + §10 评审修复记录）。**未 push**（HEAD `12f0bf0` + 评审修复未提交改动）；e2e 与生产回读不在本轮（运行时增量面仅三处 Fixed，部署随下一次授权 push）。
+
+**待办（后续批）**：TC-ORD-01/03/04、TC-CMP-03/04/05、TC-PRM-01..04、TC-SRC-03/04（清单与落点见测试计划 §8 条目 10）；生产存量幽灵行（B1 错位 / B2/B3 幽灵 normal）规模未探——存量订正需单独授权的只读探针 + 数据批。
+
 ## v6.86.0 · worker 响应锚点收口（contract anchor closeout，type-only）（2026-11-15，已上线 Version aa1a7e04）
 
 **判级与缘起**：type-only patch——运行时零变化（响应字段不增删、不改值、不改文案），零迁移、零生产写、零新增端点。锚点判据 = 「契约改一个字段 ⇒ worker tsc 必红」：把六组 worker 响应装配点全部钉到 `src/contract/` 契约真源（`c.json<契约型>` 泛型 / 函数返回标注 / 删本地重复定义改 import）。契约真源判据由 `tests/contract-anchor-lock.test.ts` 源码锁（readFileSync + 空白归一化逐字断言 + 防假绿计数，13 个受锁文件）在 vitest 层钉住形态不回退。

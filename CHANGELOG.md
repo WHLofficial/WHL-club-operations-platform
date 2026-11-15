@@ -4,6 +4,31 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.87.0] · players.status 写侧收编（转移表 + 唯一入口 + 三处还原 bug 修复）（2026-11-16，本地未 push）
+
+**Added**
+
+- `src/core/player-state.ts`：players.status 转移表（10 pure + 6 restore + 2 compound = 18 收编 cause）与 `resolveTarget` 纯函数——零 IO 语义真源；还原判据 club_id 优先于合同判定，与母本 `market-settle.ts:184-190` 同源。
+- `src/worker/player-ops.ts`：`advanceStatement(db, playerId, cause, params)` 单条语句构造器 + `advance` + `restoreAfterListing`（listingId=null 透传不加 EXISTS）/ `restoreAfterNegotiation`——全仓唯一 `UPDATE players SET status` 写侧（源码锁 13 条 SQL 写点 + 1 处头注释同串，命中全在本文件）。
+- `tests/player-state.test.ts`（转移矩阵 81 执行 / 21 合法格 + 还原上下文 + resolveTarget 直测，11 例；批 2 补齐 TC-ORD-02 十二站点批内下标锁 + TC-CMP-01/02 compound 整行断言，14 例）与 `tests/player-source-lock.test.ts`（写点唯一性 + 21 cause 台账 + 例外写点在场锁，9 例）。
+
+**Changed**
+
+- 9 文件 18 处字面 `UPDATE players SET status` 写点全部改走 player-ops 构造器：除下列 Fixed 三处外 SQL 文本、批内下标、批序契约、changes 后验逐字不变；例外 3 cause（revert_snapshot / admin_set / retire）登记不收编。
+- AGENTS.md 状态行订正：「players.status 一律走 player-ops（v6.87.0 起，18 收编 cause 全部经此入口）」。
+
+**Fixed**
+
+- B1：trainee 合同球员被匹配留人后按合同还原 trainee（原固定写 normal ⇒ normal + active trainee 合同错位，违反 I3）。
+- B2/B3：自由身强拍作废与审核驳回的幽灵 normal——还原统一走 CASE 母本补 free 分支（B3 连带删 `transfers.ts` 的 JS 合同预读，少一次 D1 SELECT）。
+- 还原句新增 EXISTS delisted 守卫（delistUnbid P1-1 同款防幻影；listingId=null 场景同值透传不加，match 单不被恒假 EXISTS 吞掉）。
+
+**Verification**
+
+- 零迁移、零生产写、零新增端点；除三处 Fixed 外运行时零变化。
+- typecheck 三份清；vitest **216 文件 / 3338 例**全绿（批 1 交付时 216/3324，评审修复 +14 例）；变异批 1 实测 M1 4 红 / M2 3 红、修复轮新锁 M-A/M-B 各恰红后还原全绿；测试计划 `docs/test-plans/v6.87.0-player-ops-state.md`（§8 偏差 10 条 + §10 评审修复记录）。
+- 未 push；评审第 1 轮 5 条 finding 全处置（ROADMAP v6.87.0 节）。
+
 ## [v6.86.0] · worker 响应锚点收口（contract anchor closeout，type-only）（2026-11-15，已上线 Version aa1a7e04）
 
 **Changed**

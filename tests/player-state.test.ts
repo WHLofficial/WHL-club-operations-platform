@@ -1,7 +1,8 @@
 // v6.87.0 批 1：players.status 写侧收编核心测试——转移矩阵 + 还原上下文 + resolveTarget 直测。
 // 对应 docs/test-plans/v6.87.0-player-ops-state.md §3.1（TC-MX-01…07）/ §3.2（TC-CTX-01…03）/
-// TC-GRD-01/02；语句位与批序锁（TC-ORD）、compound 写点与例外登记（TC-CMP）、params 细分
-//（TC-PRM）、源码锁（TC-SRC）与三处 bug 红测归后续批 / 既有域文件，不在本文件。
+// TC-GRD-01/02；批 2 补齐（评审修复轮）：§3.6 TC-ORD-02 语句位下标锁 + §3.4 TC-CMP-01/02
+// compound 整行断言在本文件尾段。其余（TC-ORD-01/03/04、TC-CMP-03/04/05、TC-PRM、TC-SRC-03/04
+// 与三处 bug 红测）仍归后续批 / 既有域文件，偏差登记见计划 §8「批 2 交付」条目。
 //
 // 矩阵口径：16 个构造器 cause（10 pure + 6 restore）× 5 状态 = 80 格；forced_auction_cancel 的
 // listed 格跑双分支（club / free）各一次 ⇒ 81 次执行、21 合法格（与计划 §3.1 清单对账）、
@@ -9,8 +10,8 @@
 // 单故障原则：每格只有 status 是被测条件，club_id / 合同 / 挂牌 / 幂等键等守卫输入全部预摆成
 // 能通过的形状（含 free/retired 格也种归属与合同——脏行形态，正是守卫要确定性处理的面）。
 import { describe, expect, it } from 'vitest';
-import type { DatabaseSync } from 'node:sqlite';
-import { createTestDb, sqlGet } from './d1.ts';
+import { DatabaseSync } from 'node:sqlite';
+import { applyMigrations, createTestD1, createTestDb, sqlGet } from './d1.ts';
 import {
   PLAYER_PURE_CAUSES,
   PLAYER_RESTORE_CAUSES,
@@ -29,6 +30,25 @@ import {
   type PlayerCauseParams,
 } from '../src/worker/player-ops.ts';
 import { advanceStatement as advanceListingStatement } from '../src/worker/listing-ops.ts';
+// 批 2 补齐（TC-ORD-02 / TC-CMP-01/02）新增的真实入口与 env 构造件
+import { app } from '../src/worker/index.ts';
+import type { Env } from '../src/worker/env.ts';
+import { resetConfigCache } from '../src/core/config.ts';
+import { resetOpsScheduleCache } from '../src/worker/ops-schedule.ts';
+import { acceptOffer } from '../src/worker/offers.ts';
+import { adminForceVoid } from '../src/worker/market-intervene.ts';
+import { delistUnbid, voidExpiredActivation } from '../src/worker/market-settle.ts';
+import { loadMarketContext } from '../src/worker/market-context.ts';
+import { createActivation, submitMatch } from '../src/worker/activations.ts';
+import { demotePlayer } from '../src/worker/promotion.ts';
+import { cancelForcedAuction, createForcedAuction } from '../src/worker/bypass.ts';
+import { voidSigningCore } from '../src/worker/negotiations.ts';
+import {
+  completeTermination,
+  completeTransfer,
+  rejectTransfer,
+  type ContractTerms,
+} from '../src/worker/transfers.ts';
 
 const CLUB = 501;
 const SENTINEL = '2020-01-01T00:00:00.000Z';
@@ -259,7 +279,7 @@ function tableDerivedTargets(): Set<string> {
             break;
           case 'transfer_complete':
           case 'terminate':
-            target = null; // 不在构造器矩阵（由后续批 TC-CMP 钉）
+            target = null; // 不在构造器矩阵（由 TC-CMP-01/02 整行断言钉）
             break;
         }
         if (target !== null) out.add(cellKey(cause, status, variant, target));
@@ -536,5 +556,570 @@ describe('构造器形态与 resolveTarget（TC-GRD）', () => {
       expect(resolveTarget(cause, { hasClub: true, contractType: 'trainee' })).toBe('trainee');
       expect(resolveTarget(cause, { hasClub: true, contractType: 'formal' })).toBe('normal');
     }
+  });
+});
+
+// ===========================================================================
+// 批 2 补齐（v6.87.0 评审修复轮）：TC-ORD-02 十二站点语句位下标锁 + TC-CMP-01/02
+// compound 整行断言（计划 §3.6 / §3.4 承诺、批 1 未交付的两面）。
+// 手法 = Proxy 包 env.DB 记录 db.batch 的批内 sqlText——消费 tests/d1.ts:49-52 夹具暴露的
+// sqlText，先例 = tests/listing-state.test.ts TC-ORD-04 的真实入口批内下标锁。防的是计划
+// §7 头号风险「语句位平移」：activations.ts:301 读 results[2]、offers.ts:536 读 results[1]、
+// bypass.ts:781 与 activations.ts:166 读 results[0]/[1] 都是下标硬耦合，advanceStatement
+// 内部多包一条语句或调用方挪动批内位置即误判。其余 TC 归后续批（计划 §8 偏差登记）。
+// ===========================================================================
+
+/** 批内 players 语句的判别片段（构造器 SQL 的独有子串；文本本身由 TC-GRD-01 锁死） */
+const LISTED_FRAGMENT = "UPDATE players SET status = 'listed'";
+const RESTORE_CASE_FRAGMENT = "WHEN club_id IS NULL THEN 'free'";
+const DEMOTE_FRAGMENT = "UPDATE players SET status = 'trainee'";
+const NORMAL_FRAGMENT = "UPDATE players SET status = 'normal'";
+const T0 = '2026-07-01T00:00:00.000Z';
+
+interface OpsFixture {
+  env: Env;
+  sqlite: DatabaseSync;
+}
+
+// env 形状照抄 house 夹具（promotion.test.ts / market-routes.test.ts 同款）：
+// 本地 SQLite 跑真迁移 + 内存 TOUR_DB 只放 user 表 + KV 会话表
+function freshOpsEnv(): OpsFixture {
+  resetConfigCache();
+  resetOpsScheduleCache();
+  const sqlite = new DatabaseSync(':memory:');
+  applyMigrations(sqlite);
+  const tour = new DatabaseSync(':memory:');
+  tour.exec(
+    `CREATE TABLE user (id INTEGER PRIMARY KEY, name TEXT, role TEXT, locked INTEGER DEFAULT 0, must_change_pw INTEGER DEFAULT 0);
+     INSERT INTO user (id, name, role, locked, must_change_pw) VALUES
+       (1, '管理组', 'admin', 0, 0), (2, '教练乙', 'coach', 0, 0), (5, '教练戊', 'coach', 0, 0);`,
+  );
+  const kv = new Map<string, string>();
+  for (const [uid, token] of [
+    [1, 'tok-admin'],
+    [2, 'tok-coach'],
+    [5, 'tok-coach2'],
+  ] as const) {
+    kv.set(`sess:${token}`, JSON.stringify({ userId: uid }));
+  }
+  const env: Env = {
+    DB: createTestD1(sqlite),
+    TOUR_DB: createTestD1(tour),
+    SESSION_KV: {
+      get: async (k: string) => kv.get(k) ?? null,
+      put: async (k: string, v: string) => void kv.set(k, v),
+      delete: async (k: string) => void kv.delete(k),
+    } as unknown as KVNamespace,
+    MEDIA: {} as never,
+    ASSETS: {} as never,
+  };
+  return { env, sqlite };
+}
+
+// TC-ORD 站点共用世界线：club 1（卖方，教练 tok-coach=uid2 绑定）/ club 2（买方，tok-coach2=uid5）
+// / club 3（守卫格备用）；窗 1 已关、窗 2 开 ⇒ closedRegularTicks=1，激活的「效力为 0 不可激活」
+// 校验（activations.ts:100）可过；球员 10 = 在册正式合同（RC 20 / 身价 30），球员 11 = 训练营。
+function seedOrdWorld(sqlite: DatabaseSync): void {
+  sqlite.exec(`
+    INSERT INTO clubs (id, name, league_tier, status) VALUES
+      (1, '下标锁卖方', 'premier', 'active'), (2, '下标锁买方', 'premier', 'active'), (3, '下标锁第三队', 'premier', 'active');
+    INSERT INTO seasons (season, status) VALUES (1, 'running');
+    INSERT INTO season_windows (season, window_seq, status, is_temporary, opened_at) VALUES
+      (1, 1, 'closed', 0, '2026-05-01T00:00:00Z'), (1, 2, 'open', 0, '2026-07-01T00:00:00Z');
+    INSERT INTO club_bindings (club_id, user_id, bound_at) VALUES (1, 2, '2026-01-01T00:00:00Z'), (2, 5, '2026-01-01T00:00:00Z');
+    INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, market_value, growable, status, updated_at) VALUES
+      (10, 'ord10', '下标甲', 1, 'ST', 26, 80, 85, 30, 1, 'normal', '${SENTINEL}'),
+      (11, 'ord11', '下标乙', 1, 'ST', 18, 62, 80, NULL, 1, 'trainee', '${SENTINEL}');
+    INSERT INTO contracts (id, player_id, club_id, release_fee, wage, contract_type, is_active, signed_at, effective_from, service_ticks, protection_ticks) VALUES
+      (10, 10, 1, 20, 2, 'formal', 1, '2026-06-01T00:00:00Z', '2026-06-01', 2, 1),
+      (11, 11, 1, 5, 0.75, 'trainee', 1, '2026-06-01T00:00:00Z', '2026-06-01', 0, NULL);
+    INSERT INTO ledger_accounts (club_id, balance, updated_at) VALUES (1, 200, '${T0}'), (2, 200, '${T0}');
+    INSERT INTO ledger_entries (club_id, kind, amount, balance_after, memo, created_at) VALUES
+      (1, 'opening_import', 200, 200, '期初', '${T0}'),
+      (2, 'opening_import', 200, 200, '期初', '${T0}');
+  `);
+}
+
+function seedOrdListing(
+  sqlite: DatabaseSync,
+  over: { id: number; playerId: number; sellerClubId: number | null; type: string; status: string; askPrice?: number; activatedBy?: number; activationDeadline?: string },
+): void {
+  sqlite
+    .prepare(
+      `INSERT INTO listings (id, player_id, seller_club_id, type, ask_price, status, listed_at, listed_day, activated_by, activation_deadline, season, window_seq)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 2)`,
+    )
+    .run(
+      over.id,
+      over.playerId,
+      over.sellerClubId,
+      over.type,
+      over.askPrice ?? 10,
+      over.status,
+      T0,
+      '2026-07-01',
+      over.activatedBy ?? null,
+      over.activationDeadline ?? null,
+    );
+}
+
+// Proxy 包 db：只在 batch 上加记录（批内 sqlText 数组按批累积），其余属性原样透传。
+// Proxy 保持目标对象类型，不需要 as 断言（仓库铁律）。
+function traceBatches(db: D1Database): { db: D1Database; batches: string[][] } {
+  const batches: string[][] = [];
+  const wrapped = new Proxy(db, {
+    get(target, prop, receiver) {
+      if (prop === 'batch') {
+        return async (statements: D1PreparedStatement[]) => {
+          batches.push(statements.map((stmt) => sqlTextOf(stmt)));
+          return target.batch(statements);
+        };
+      }
+      return Reflect.get(target, prop, receiver);
+    },
+  });
+  return { db: wrapped, batches };
+}
+
+// 找到含目标片段的批（应恰一个），断言该批内 players 语句恰一条且下标不变
+function assertPlayerStmtIndex(batches: string[][], fragment: string, expectedIndex: number, label: string): void {
+  const hostBatches = batches.filter((batch) => batch.some((sql) => sql.includes(fragment)));
+  expect(hostBatches, `${label}：含「${fragment}」语句的批应恰有一个`).toHaveLength(1);
+  const indexes = hostBatches[0]
+    .map((sql, i) => (sql.includes(fragment) ? i : -1))
+    .filter((i) => i >= 0);
+  expect(indexes, `${label}：批内 players 语句恰一条`).toHaveLength(1);
+  expect(indexes[0], `${label}：players 语句批内下标`).toBe(expectedIndex);
+}
+
+const playerStatusOf = (sqlite: DatabaseSync, id: number): string | undefined =>
+  sqlGet<{ status: string }>(sqlite, 'SELECT status FROM players WHERE id = ?', id)?.status;
+
+describe('语句位与批序锁（TC-ORD-02，§3.6 批 2 补齐：12 个批内语句位点）', () => {
+  it('① market 挂牌路由：players listed 化在批下标 [1]（INSERT listings 之后、audit/demand 之前）', async () => {
+    const fx = freshOpsEnv();
+    seedOrdWorld(fx.sqlite);
+    const trace = traceBatches(fx.env.DB);
+    const res = await app.request(
+      '/api/market/listings',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', Cookie: 'whl_session=tok-coach' },
+        body: JSON.stringify({ playerId: 10, askPrice: 15 }),
+      },
+      { ...fx.env, DB: trace.db },
+    );
+    expect(res.status).toBe(201);
+    assertPlayerStmtIndex(trace.batches, LISTED_FRAGMENT, 1, 'market 挂牌');
+    expect(playerStatusOf(fx.sqlite, 10)).toBe('listed');
+  });
+
+  it('② offers 履约批：players listed 化在 [1]（[0] 条件 INSERT 之后；results[1] 判成的下标耦合）', async () => {
+    const fx = freshOpsEnv();
+    seedOrdWorld(fx.sqlite);
+    // 先落 offers 再落 fund_holds——fund_holds_offer_guard 校验报价仍 pending（expiry-ops 同款顺序）
+    fx.sqlite.exec(`
+      INSERT INTO offers (id, player_id, buyer_club_id, seller_club_id, amount, init_amount, round, note, status, turn, hold_id, listing_id, season, window_seq, created_at, updated_at, resolved_at, expiry_anchor_at, reminded_at)
+        VALUES (1, 10, 2, 1, 15, 15, 1, '', 'pending', 'seller', 1, NULL, 1, 2, '${T0}', '${T0}', NULL, '', '');
+      INSERT INTO fund_holds (id, club_id, amount, status, ref_type, ref_id, created_at)
+        VALUES (1, 2, 15, 'held', 'offer', 1, '${T0}');
+    `);
+    const trace = traceBatches(fx.env.DB);
+    const out = await acceptOffer({ ...fx.env, DB: trace.db }, { offerId: 1, clubId: 1, actor: 2 });
+    expect(out.ok).toBe(true);
+    expect(out.listingId).toBeGreaterThan(0); // results[1] 判成 + last_row_id 链路在工作
+    assertPlayerStmtIndex(trace.batches, LISTED_FRAGMENT, 1, 'offer 履约');
+    expect(playerStatusOf(fx.sqlite, 10)).toBe('listed');
+  });
+
+  it('③ createActivation：players 在 [0]（批首；results[0]/[1] 判 409 的下标耦合）', async () => {
+    const fx = freshOpsEnv();
+    seedOrdWorld(fx.sqlite);
+    const trace = traceBatches(fx.env.DB);
+    const out = await createActivation({ ...fx.env, DB: trace.db }, 2, 5, 11, 'activation/2/ord02-proof.png');
+    expect(out.ok).toBe(true);
+    assertPlayerStmtIndex(trace.batches, LISTED_FRAGMENT, 0, '激活挂牌');
+    expect(playerStatusOf(fx.sqlite, 11)).toBe('listed');
+  });
+
+  it('④ createForcedAuction markListed：players 在 [0]（批首；results[0]/[1] 判 409 的下标耦合）', async () => {
+    const fx = freshOpsEnv();
+    seedOrdWorld(fx.sqlite);
+    const trace = traceBatches(fx.env.DB);
+    const out = await createForcedAuction({ ...fx.env, DB: trace.db }, 1, 10, 1);
+    expect(out.ok).toBe(true);
+    assertPlayerStmtIndex(trace.batches, LISTED_FRAGMENT, 0, '强制拍卖挂牌');
+    expect(playerStatusOf(fx.sqlite, 10)).toBe('listed');
+  });
+
+  it('⑤ cancelForcedAuction：players 还原在 [1]（listings forced_cancel 之后）', async () => {
+    const fx = freshOpsEnv();
+    seedOrdWorld(fx.sqlite);
+    seedOrdListing(fx.sqlite, { id: 20, playerId: 10, sellerClubId: 1, type: 'forced', status: 'listed', askPrice: 1 });
+    fx.sqlite.exec(`UPDATE players SET status = 'listed' WHERE id = 10`);
+    const trace = traceBatches(fx.env.DB);
+    const out = await cancelForcedAuction({ ...fx.env, DB: trace.db }, 1, 20);
+    expect(out.ok).toBe(true);
+    assertPlayerStmtIndex(trace.batches, NORMAL_FRAGMENT, 1, '强拍取消还原');
+    expect(playerStatusOf(fx.sqlite, 10)).toBe('normal');
+  });
+
+  it('⑥ delistUnbid：players 还原在 [1]（unbid_expired 之后，EXISTS 读同批先行语句）', async () => {
+    const fx = freshOpsEnv();
+    seedOrdWorld(fx.sqlite);
+    seedOrdListing(fx.sqlite, { id: 21, playerId: 10, sellerClubId: 1, type: 'normal', status: 'listed', askPrice: 10 });
+    fx.sqlite.exec(`
+      UPDATE players SET status = 'listed' WHERE id = 10;
+      INSERT INTO fund_holds (id, club_id, amount, status, ref_type, ref_id, created_at)
+        VALUES (30, 2, 10, 'held', 'listing', 21, '${T0}');
+    `);
+    const trace = traceBatches(fx.env.DB);
+    const ctx = await loadMarketContext(trace.db);
+    const out = await delistUnbid(
+      { ...fx.env, DB: trace.db },
+      { id: 21, player_id: 10, seller_club_id: 1, type: 'normal', ask_price: 10, season: 1, window_seq: 2 },
+      ctx,
+      null,
+      'cron_tick',
+    );
+    expect(out).toBe('delisted');
+    assertPlayerStmtIndex(trace.batches, RESTORE_CASE_FRAGMENT, 1, 'delistUnbid 还原');
+    expect(playerStatusOf(fx.sqlite, 10)).toBe('normal');
+  });
+
+  it('⑦ voidExpiredActivation：players 还原在 [1]（listings 语句之后）', async () => {
+    const fx = freshOpsEnv();
+    seedOrdWorld(fx.sqlite);
+    seedOrdListing(fx.sqlite, {
+      id: 22,
+      playerId: 11,
+      sellerClubId: 1,
+      type: 'activation',
+      status: 'listed',
+      askPrice: 5,
+      activatedBy: 2,
+      activationDeadline: '2000-01-01T00:00:00.000Z',
+    });
+    fx.sqlite.exec(`UPDATE players SET status = 'listed' WHERE id = 11`);
+    const trace = traceBatches(fx.env.DB);
+    const out = await voidExpiredActivation(trace.db, 22, 11, null, 'cron_tick');
+    expect(out).toBe(true);
+    assertPlayerStmtIndex(trace.batches, RESTORE_CASE_FRAGMENT, 1, '激活过期还原');
+    expect(playerStatusOf(fx.sqlite, 11)).toBe('trainee'); // trainee 合同按 CASE 还原 trainee
+  });
+
+  it('⑧ demotePlayer：players 在 [5]/共 6（settledGuard 同批依赖链尾）', async () => {
+    const fx = freshOpsEnv();
+    seedOrdWorld(fx.sqlite);
+    const trace = traceBatches(fx.env.DB);
+    const out = await demotePlayer({ ...fx.env, DB: trace.db }, 1, 2, 10);
+    expect(out.ok).toBe(true);
+    assertPlayerStmtIndex(trace.batches, DEMOTE_FRAGMENT, 5, '下放');
+    expect(playerStatusOf(fx.sqlite, 10)).toBe('trainee');
+  });
+
+  it('⑨ submitMatch：players 还原在 [5]/共 6（results[2] 判 409 的下标耦合）', async () => {
+    const fx = freshOpsEnv();
+    seedOrdWorld(fx.sqlite);
+    seedOrdListing(fx.sqlite, {
+      id: 23,
+      playerId: 11,
+      sellerClubId: 1,
+      type: 'activation',
+      status: 'matched_pending',
+      askPrice: 5,
+      activatedBy: 2,
+    });
+    fx.sqlite.exec(`
+      UPDATE players SET status = 'listed' WHERE id = 11;
+      INSERT INTO bids (id, listing_id, club_id, amount, created_at, status) VALUES (1, 23, 2, 5, '${T0}', 'active');
+    `);
+    const trace = traceBatches(fx.env.DB);
+    const out = await submitMatch({ ...fx.env, DB: trace.db }, 1, 2, 23, 10);
+    expect(out.ok).toBe(true);
+    expect(out.decision).toBe('match');
+    assertPlayerStmtIndex(trace.batches, RESTORE_CASE_FRAGMENT, 5, '匹配留人还原');
+    expect(playerStatusOf(fx.sqlite, 11)).toBe('trainee'); // B1 修复面在真实批内的落点
+  });
+
+  it('⑩ adminForceVoid：players 还原在 [3]/共 5（admin_cancel 之后）', async () => {
+    const fx = freshOpsEnv();
+    seedOrdWorld(fx.sqlite);
+    seedOrdListing(fx.sqlite, { id: 24, playerId: 10, sellerClubId: 1, type: 'normal', status: 'listed', askPrice: 10 });
+    fx.sqlite.exec(`
+      UPDATE players SET status = 'listed' WHERE id = 10;
+      INSERT INTO fund_holds (id, club_id, amount, status, ref_type, ref_id, created_at)
+        VALUES (31, 2, 10, 'held', 'listing', 24, '${T0}');
+    `);
+    const trace = traceBatches(fx.env.DB);
+    const out = await adminForceVoid({ ...fx.env, DB: trace.db }, 24, 1, '下标锁');
+    expect(out).toBe('done');
+    assertPlayerStmtIndex(trace.batches, RESTORE_CASE_FRAGMENT, 3, '强制作废还原');
+    expect(playerStatusOf(fx.sqlite, 10)).toBe('normal');
+  });
+
+  it('⑪ voidSigningCore：players 还原在 [4]/共 7（negotiation_closed 之后）', async () => {
+    const fx = freshOpsEnv();
+    seedOrdWorld(fx.sqlite);
+    // 冻结与出价要在挂牌 listed 时落（fund_holds_bid_guard 只认 listed/bidding），再翻进 pending_review
+    seedOrdListing(fx.sqlite, { id: 25, playerId: 43, sellerClubId: 1, type: 'normal', status: 'listed', askPrice: 40 });
+    fx.sqlite.exec(`
+      INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, status, updated_at) VALUES
+        (43, 'ord43', '签约中', 2, 'GK', 24, 70, 80, 'listed', '${SENTINEL}');
+      INSERT INTO contracts (id, player_id, club_id, release_fee, wage, contract_type, is_active, signed_at, effective_from, service_ticks, protection_ticks) VALUES
+        (43, 43, 2, 40, 2, 'formal', 1, '2026-06-01T00:00:00Z', '2026-06-01', 1, NULL);
+      INSERT INTO fund_holds (id, club_id, amount, status, ref_type, ref_id, created_at)
+        VALUES (32, 2, 40, 'held', 'listing', 25, '${T0}');
+      INSERT INTO bids (id, listing_id, club_id, amount, created_at, status) VALUES (2, 25, 2, 40, '${T0}', 'active');
+      UPDATE listings SET status = 'pending_review' WHERE id = 25;
+      INSERT INTO transfers (id, type, player_id, from_club_id, to_club_id, fee, status, season, window_seq, idempotency_key, evidence, created_at) VALUES
+        (26, 'transfer', 43, 1, 2, 40, 'signing', 1, 2, 'listing:25', '{}', '${T0}');
+      INSERT INTO negotiation_sessions (id, transfer_id, player_id, club_id, release_fee, expected_wage, attempt_count, status, created_at, expiry_anchor_at, reminded_at)
+        VALUES (30, 26, 43, 2, 40, 3, 0, 'active', '${T0}', '${T0}', '');
+    `);
+    const trace = traceBatches(fx.env.DB);
+    const out = await voidSigningCore({ ...fx.env, DB: trace.db }, 30, {
+      actor: 1,
+      origin: 'user',
+      action: 'admin_negotiation_void',
+      deadlineNote: '下标锁',
+      reason: '下标锁',
+    });
+    expect(out).toBe('done');
+    assertPlayerStmtIndex(trace.batches, RESTORE_CASE_FRAGMENT, 4, '签约作废还原');
+    expect(playerStatusOf(fx.sqlite, 43)).toBe('normal');
+  });
+
+  it('⑫ rejectTransfer：players 还原在 [4]（review_rejected 之后、transfers UPDATE 之前）', async () => {
+    const fx = freshOpsEnv();
+    seedOrdWorld(fx.sqlite);
+    // 冻结与出价要在挂牌 listed 时落（fund_holds_bid_guard 只认 listed/bidding），再翻进 pending_review
+    seedOrdListing(fx.sqlite, { id: 26, playerId: 44, sellerClubId: 1, type: 'normal', status: 'listed', askPrice: 40 });
+    fx.sqlite.exec(`
+      INSERT INTO players (id, uid, name, club_id, position, age, ca, pa, status, updated_at) VALUES
+        (44, 'ord44', '待审中', 1, 'ST', 24, 75, 82, 'listed', '${SENTINEL}');
+      INSERT INTO contracts (id, player_id, club_id, release_fee, wage, contract_type, is_active, signed_at, effective_from, service_ticks, protection_ticks) VALUES
+        (44, 44, 1, 40, 2, 'formal', 1, '2026-06-01T00:00:00Z', '2026-06-01', 1, NULL);
+      INSERT INTO fund_holds (id, club_id, amount, status, ref_type, ref_id, created_at)
+        VALUES (33, 2, 40, 'held', 'listing', 26, '${T0}');
+      INSERT INTO bids (id, listing_id, club_id, amount, created_at, status) VALUES (3, 26, 2, 40, '${T0}', 'active');
+      UPDATE listings SET status = 'pending_review' WHERE id = 26;
+      INSERT INTO transfers (id, type, player_id, from_club_id, to_club_id, fee, status, season, window_seq, idempotency_key, evidence, created_at) VALUES
+        (27, 'transfer', 44, 1, 2, 40, 'pending_review', 1, 2, 'listing:26', '{}', '${T0}');
+      INSERT INTO review_tasks (id, type, ref_id, payload, status) VALUES (1, 'transfer_confirm', 27, '{}', 'open');
+    `);
+    const trace = traceBatches(fx.env.DB);
+    const out = await rejectTransfer({ ...fx.env, DB: trace.db }, 27, 1, 'user', {
+      taskId: 1,
+      decidedBy: 1,
+      decision: 'rejected',
+      note: '下标锁',
+    });
+    expect(out.status).toBe('rejected');
+    assertPlayerStmtIndex(trace.batches, RESTORE_CASE_FRAGMENT, 4, '审核驳回还原');
+    expect(playerStatusOf(fx.sqlite, 44)).toBe('normal');
+  });
+});
+
+describe('compound 写点整行断言（TC-CMP-01/02，§3.4 批 2 补齐）', () => {
+  // compound 环境不需要会话：直接调 completeTransfer / completeTermination 服务函数
+  //（growth-tier-routes.test.ts §10.3 触发点同款直调先例）
+  function freshCmpEnv(): OpsFixture {
+    resetConfigCache();
+    const sqlite = new DatabaseSync(':memory:');
+    applyMigrations(sqlite);
+    const tour = new DatabaseSync(':memory:');
+    tour.exec(
+      `CREATE TABLE user (id INTEGER PRIMARY KEY, name TEXT, role TEXT, locked INTEGER DEFAULT 0, must_change_pw INTEGER DEFAULT 0);
+       INSERT INTO user (id, name, role, locked, must_change_pw) VALUES (1, '管理组', 'admin', 0, 0);`,
+    );
+    const env: Env = {
+      DB: createTestD1(sqlite),
+      TOUR_DB: createTestD1(tour),
+      SESSION_KV: {
+        get: async () => null,
+        put: async () => undefined,
+        delete: async () => undefined,
+      } as unknown as KVNamespace,
+      MEDIA: {} as never,
+      ASSETS: {} as never,
+    };
+    return { env, sqlite };
+  }
+
+  // 挂牌设置六列 + 号码全部预摆成脏值（号码取球员 id，避开 (club_id, number) 唯一索引）：
+  // 断言「换队九列整行清写」才有对比面
+  function seedCmpPlayer(sqlite: DatabaseSync, over: { id: number; clubId: number | null; status?: string; ca?: number; baseCa?: number; growthXp?: number; levelsApplied?: number }): void {
+    sqlite
+      .prepare(
+        `INSERT INTO players (id, uid, name, club_id, position, age, ca, base_ca, pa, growth_xp, levels_applied, number,
+                              transfer_listed, list_price, min_offer_price, offer_auto, not_for_sale, transfer_listed_at,
+                              status, updated_at)
+         VALUES (?, ?, ?, ?, 'ST', 24, ?, ?, 85, ?, ?, ?, 1, 10, 5, 1, 1, '${T0}', ?, '${SENTINEL}')`,
+      )
+      .run(
+        over.id,
+        `cmp${over.id}`,
+        `整行${over.id}`,
+        over.clubId,
+        over.ca ?? 80,
+        over.baseCa ?? null,
+        over.growthXp ?? 0,
+        over.levelsApplied ?? 0,
+        over.id,
+        over.status ?? 'normal',
+      );
+  }
+
+  function seedCmpContract(sqlite: DatabaseSync, playerId: number, clubId: number, contractType: 'formal' | 'trainee'): void {
+    sqlite
+      .prepare(
+        `INSERT INTO contracts (id, player_id, club_id, release_fee, wage, contract_type, is_active, signed_at, effective_from, service_ticks, protection_ticks)
+         VALUES (?, ?, ?, 20, 2.5, ?, 1, '2026-06-01T00:00:00Z', '2026-06-01', 2, NULL)`,
+      )
+      .run(playerId, playerId, clubId, contractType);
+  }
+
+  function seedCmpTransfer(
+    sqlite: DatabaseSync,
+    over: { id: number; type?: string; playerId: number; from: number | null; to: number | null; fee?: number | null; status?: string },
+  ): void {
+    sqlite
+      .prepare(
+        `INSERT INTO transfers (id, type, player_id, from_club_id, to_club_id, fee, status, season, window_seq, evidence)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 1, 2, '{}')`,
+      )
+      .run(over.id, over.type ?? 'transfer', over.playerId, over.from, over.to, over.fee === undefined ? 10 : over.fee, over.status ?? 'pending_review');
+  }
+
+  function seedCmpClubs(sqlite: DatabaseSync): void {
+    sqlite.exec(`
+      INSERT INTO clubs (id, name, league_tier, status) VALUES
+        (1, '整行卖方', 'premier', 'active'), (2, '整行买方', 'premier', 'active'), (3, '整行第三队', 'premier', 'active');
+      INSERT INTO ledger_accounts (club_id, balance, updated_at) VALUES (1, 200, '${T0}'), (2, 200, '${T0}'), (3, 200, '${T0}');
+      INSERT INTO ledger_entries (club_id, kind, amount, balance_after, memo, created_at) VALUES
+        (1, 'opening_import', 200, 200, '期初', '${T0}'),
+        (2, 'opening_import', 200, 200, '期初', '${T0}'),
+        (3, 'opening_import', 200, 200, '期初', '${T0}');
+    `);
+  }
+
+  // 换队九列的目标值形态（transfers.ts:484 的 SET 列集，status 由 resolveTarget 产出）
+  const NINE_COL_TARGET = {
+    club_id: 2,
+    number: null,
+    transfer_listed: 0,
+    list_price: null,
+    min_offer_price: null,
+    offer_auto: 0,
+    not_for_sale: 0,
+    transfer_listed_at: null,
+  };
+
+  it('TC-CMP-01 completeTransfer：ctx 四式 status + 九列整行断言 + 守卫格整行不变 + 海捞格照写', async () => {
+    const fx = freshCmpEnv();
+    seedCmpClubs(fx.sqlite);
+    for (const id of [1, 2, 3, 4]) seedCmpPlayer(fx.sqlite, { id, clubId: 1 });
+    seedCmpPlayer(fx.sqlite, { id: 5, clubId: 3 }); // 守卫格：实际归属 club 3，单据写 from 1
+    seedCmpPlayer(fx.sqlite, { id: 6, clubId: null, status: 'free' }); // 海捞格
+    seedCmpContract(fx.sqlite, 1, 1, 'formal'); // v1：现行 formal + terms trainee → trainee
+    seedCmpContract(fx.sqlite, 2, 1, 'trainee'); // v2：现行 trainee + terms formal → normal
+    seedCmpContract(fx.sqlite, 3, 1, 'trainee'); // v3：无 terms + 现行 trainee → trainee
+    seedCmpContract(fx.sqlite, 4, 1, 'formal'); // v4：无 terms + 现行 formal → normal
+    seedCmpContract(fx.sqlite, 5, 3, 'formal');
+    for (const id of [1, 2, 3, 4, 5]) seedCmpTransfer(fx.sqlite, { id, playerId: id, from: 1, to: 2 });
+    seedCmpTransfer(fx.sqlite, { id: 6, type: 'free_agent', playerId: 6, from: null, to: 2, fee: 0 });
+
+    const traineeTerms: ContractTerms = { wage: 2, releaseFee: 20, source: 'negotiation', contractType: 'trainee' };
+    const formalTerms: ContractTerms = { wage: 2, releaseFee: 20, source: 'negotiation', contractType: 'formal' };
+
+    // 四式：dealTerms 优先、否则现行合同、无合同回 normal（resolveTarget('transfer_complete')）
+    expect((await completeTransfer(fx.env, 1, null, 'user', undefined, traineeTerms)).status).toBe('completed');
+    expect(sqlGet<Record<string, unknown>>(fx.sqlite, 'SELECT * FROM players WHERE id = 1')).toMatchObject({
+      status: 'trainee',
+      ...NINE_COL_TARGET,
+    });
+    expect((await completeTransfer(fx.env, 2, null, 'user', undefined, formalTerms)).status).toBe('completed');
+    expect(sqlGet<Record<string, unknown>>(fx.sqlite, 'SELECT * FROM players WHERE id = 2')).toMatchObject({
+      status: 'normal',
+      ...NINE_COL_TARGET,
+    });
+    expect((await completeTransfer(fx.env, 3, null, 'user')).status).toBe('completed');
+    expect(sqlGet<Record<string, unknown>>(fx.sqlite, 'SELECT * FROM players WHERE id = 3')).toMatchObject({
+      status: 'trainee',
+      ...NINE_COL_TARGET,
+    });
+    expect((await completeTransfer(fx.env, 4, null, 'user')).status).toBe('completed');
+    const row4 = sqlGet<Record<string, unknown>>(fx.sqlite, 'SELECT * FROM players WHERE id = 4');
+    expect(row4).toMatchObject({ status: 'normal', ...NINE_COL_TARGET });
+    expect(row4?.updated_at).not.toBe(SENTINEL); // 时间列只断言离开哨兵（计划 §3.6 时间列剔除规则同款）
+
+    // 守卫格：moveFromClubId（= null）与球员现 club 不符 → club_id IS NULL 不命中 → 整行不变
+    const before5 = JSON.stringify(sqlGet(fx.sqlite, 'SELECT * FROM players WHERE id = 5'));
+    expect((await completeTransfer(fx.env, 5, null, 'user')).status).toBe('completed');
+    expect(JSON.stringify(sqlGet(fx.sqlite, 'SELECT * FROM players WHERE id = 5'))).toBe(before5);
+
+    // 海捞格：moveFromClubId = null 命中 club_id IS NULL 的自由身 → 照常写入九列
+    expect((await completeTransfer(fx.env, 6, null, 'user')).status).toBe('completed');
+    const row6 = sqlGet<Record<string, unknown>>(fx.sqlite, 'SELECT * FROM players WHERE id = 6');
+    expect(row6).toMatchObject({ status: 'normal', ...NINE_COL_TARGET });
+    expect(row6?.updated_at).not.toBe(SENTINEL);
+  });
+
+  it('TC-CMP-02 completeTermination：12 列整行断言（ca 回 base_ca）+ 守卫格整行不变 + retired 格照写 free', async () => {
+    const fx = freshCmpEnv();
+    seedCmpClubs(fx.sqlite);
+    seedCmpPlayer(fx.sqlite, { id: 1, clubId: 1, ca: 90, baseCa: 80, growthXp: 50, levelsApplied: 2 }); // 主格：预置成长
+    seedCmpPlayer(fx.sqlite, { id: 2, clubId: 3 }); // 守卫格：归属 club 3，单据 from 1
+    seedCmpPlayer(fx.sqlite, { id: 3, clubId: 1, status: 'retired' }); // retired 格：compound 无 status 守卫
+    seedCmpContract(fx.sqlite, 1, 1, 'formal');
+    seedCmpContract(fx.sqlite, 3, 1, 'formal');
+    for (const id of [1, 2, 3]) seedCmpTransfer(fx.sqlite, { id, type: 'termination', playerId: id, from: 1, to: null, fee: null });
+
+    expect((await completeTermination(fx.env, 1, 1, 'user')).status).toBe('completed');
+    const row1 = sqlGet<Record<string, unknown>>(fx.sqlite, 'SELECT * FROM players WHERE id = 1');
+    expect(row1).toMatchObject({
+      status: 'free',
+      club_id: null,
+      number: null,
+      ca: 80, // COALESCE(base_ca, ca)：成长所得归零回初始
+      growth_xp: 0,
+      levels_applied: 0,
+      transfer_listed: 0,
+      list_price: null,
+      min_offer_price: null,
+      offer_auto: 0,
+      not_for_sale: 0,
+      transfer_listed_at: null,
+    });
+    expect(row1?.updated_at).not.toBe(SENTINEL);
+
+    // 守卫格：club_id = from_club_id 不命中 → 终止 UPDATE 0 行——它写的 12 列整组不变。
+    //（同批的徽章台账重算 / 成长划断事件会触到该行 updated_at 等其它列，整行 JSON 对比不成立，
+    // 断言只锁终止 UPDATE 自己的列集。）
+    const TERMINATION_COLS: string[] = [
+      'status',
+      'club_id',
+      'number',
+      'ca',
+      'growth_xp',
+      'levels_applied',
+      'transfer_listed',
+      'list_price',
+      'min_offer_price',
+      'offer_auto',
+      'not_for_sale',
+      'transfer_listed_at',
+    ];
+    const before2 = sqlGet<Record<string, unknown>>(fx.sqlite, 'SELECT * FROM players WHERE id = 2');
+    expect((await completeTermination(fx.env, 2, 1, 'user')).status).toBe('completed');
+    const after2 = sqlGet<Record<string, unknown>>(fx.sqlite, 'SELECT * FROM players WHERE id = 2');
+    for (const key of TERMINATION_COLS) {
+      expect(after2?.[key], `守卫格 ${key} 应不变`).toBe(before2?.[key]);
+    }
+
+    // retired 格照写 free（changes=1）——compound 无 status 守卫是有意设计（计划 L7 / TC-CMP-02）
+    expect((await completeTermination(fx.env, 3, 1, 'user')).status).toBe('completed');
+    expect(sqlGet<Record<string, unknown>>(fx.sqlite, 'SELECT * FROM players WHERE id = 3')).toMatchObject({ status: 'free', club_id: null });
   });
 });
