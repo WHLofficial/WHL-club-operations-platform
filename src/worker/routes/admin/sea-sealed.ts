@@ -6,12 +6,14 @@ import type { Env } from '../../env.ts';
 import { requireAdmin } from '../../../lib/session.ts';
 import { cancelCurrentBatch, extendSeaBatch, loadSeaAdminView, openNow } from '../../sea-sealed.ts';
 import { readJson } from './shared.ts';
+// 契约锚点（v6.86.0）：四路响应以 src/contract/batch5.ts 为真源标注（ops 返回标注已锁，路由泛型双保险）
+import type { SeaAdminView, SeaCancelResult, SeaExtendResult, SeaOpenSummary } from '../../../contract/batch5.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
 app.get('/sea-sealed', async (c) => {
   await requireAdmin(c.env, c.req.raw);
-  return c.json(await loadSeaAdminView(c.env));
+  return c.json<SeaAdminView>(await loadSeaAdminView(c.env));
 });
 
 // 立即开标：不等 deadline（force=true 顺带收掉崩在半路的 settling 批次）
@@ -19,7 +21,7 @@ app.post('/sea-sealed/open', async (c) => {
   const user = await requireAdmin(c.env, c.req.raw);
   const body = (await readJson(c)) as Record<string, unknown> | null;
   const batchId = typeof body?.batchId === 'number' ? body.batchId : undefined;
-  return c.json(await openNow(c.env, user.id ?? null, batchId));
+  return c.json<SeaOpenSummary>(await openNow(c.env, user.id ?? null, batchId));
 });
 
 // 延长暗标段（body { deadlineAt: ISO, batchId? }）：批次与时刻表那一行同改，两把尺子不打架
@@ -28,7 +30,7 @@ app.post('/sea-sealed/extend', async (c) => {
   const body = (await readJson(c)) as Record<string, unknown> | null;
   const batchId = typeof body?.batchId === 'number' ? body.batchId : undefined;
   const batch = await extendSeaBatch(c.env, user.id ?? null, body?.deadlineAt, batchId);
-  return c.json({
+  return c.json<SeaExtendResult>({
     ok: true,
     batch: {
       id: batch.id,
@@ -47,7 +49,7 @@ app.post('/sea-sealed/cancel', async (c) => {
   const body = (await readJson(c)) as Record<string, unknown> | null;
   const batchId = typeof body?.batchId === 'number' ? body.batchId : undefined;
   const note = typeof body?.note === 'string' ? body.note : undefined;
-  return c.json(await cancelCurrentBatch(c.env, user.id ?? null, batchId, note));
+  return c.json<SeaCancelResult>(await cancelCurrentBatch(c.env, user.id ?? null, batchId, note));
 });
 
 export default app;

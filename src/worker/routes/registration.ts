@@ -17,6 +17,8 @@ import { rowDisplayName } from '../../core/player-name.ts';
 import { influenceCoefs, influenceOf } from '../influence.ts';
 import { createAuditStatement } from '../../lib/audit.ts';
 import { loadClubPendingChanges } from '../demand-ops.ts';
+// 契约锚点（v6.86.0）：主响应 / 号码批量回执 / 409 冲突明细以 src/contract/batch2.ts 为真源
+import type { NumberConflict, SquadNumbersResponse, SquadOverview } from '../../contract/batch2.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -184,7 +186,7 @@ app.get('/club/squad', async (c) => {
     windowSeq: openWindow?.windowSeq ?? null,
   });
 
-  return c.json({
+  return c.json<SquadOverview>({
     club: { id: club.id, name: club.name, leagueTier: tier },
     season,
     // 报名状态探测（v1.2.0）：registeredInTournament=已报定级赛事（tier 非 null）
@@ -271,12 +273,8 @@ interface NumberAssignment {
   number: string | null;
 }
 
-interface NumberConflict {
-  number: string;
-  playerId: number;
-  playerName: string;
-}
-
+// NumberConflict 三字段真源 = 契约 batch2.ts:376-380（本文件 import type 承载）：
+// 409 冲突体 {error, code:'number_conflict', conflicts} 走 ApiError.conflicts 消费，契约有意不建模该错误体。
 interface OwnedNumberRow {
   id: number;
   name: string;
@@ -450,7 +448,7 @@ app.put('/club/squad/numbers', async (c) => {
     return c.json({ error: '有号码和队友冲突，先处理标红的号码', code: 'number_conflict', conflicts }, 409);
   }
   await writeNumberAssignments(c.env, user.id, club.id, applied);
-  return c.json({ ok: true, applied });
+  return c.json<SquadNumbersResponse>({ ok: true, applied });
 });
 
 // POST /api/club/players/:id/number —— 单条改号（保留给球员页；与批量共用同一校验/写入核心）
