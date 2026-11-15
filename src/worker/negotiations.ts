@@ -33,6 +33,8 @@ import { assertOpOpen } from './ops-schedule.ts';
 import { freeAgentFee, freeAgentFeeGap } from '../core/bypass-rules.ts';
 import { availableBalance, creditLineGuard, ledgerMovement } from './ledger.ts';
 import { advanceStatement } from './listing-ops.ts';
+import type { WageForecast } from '../contract/batch1.ts';
+import type { MyNegotiations, NegotiationSession, OfferResult, ReleaseFeeResult, TraineeSignResult, TransferType } from '../contract/batch5.ts';
 
 function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
@@ -301,7 +303,7 @@ export async function submitReleaseFee(
   clubId: number,
   actor: number | null,
   feeInput: unknown,
-): Promise<{ ok: true; releaseFee: number; expectedWage: number }> {
+): Promise<ReleaseFeeResult> {
   const db = env.DB;
   const transfer = await loadTransfer(db, transferId);
   if (!transfer) throw new HttpError(404, '转会单不存在');
@@ -371,16 +373,6 @@ export async function submitReleaseFee(
   return { ok: true, releaseFee: fee, expectedWage: e };
 }
 
-export interface OfferOutcome {
-  result: 'success' | 'fail' | 'direct' | 'forced';
-  attemptNo: number;
-  remaining: number;
-  wage?: number;
-  satisfaction?: string;
-  risk?: boolean;
-  message?: string;
-}
-
 interface AttemptRow {
   attempt_no: number;
   offered_wage: number;
@@ -426,7 +418,7 @@ export async function offerWage(
   clubId: number,
   actor: number | null,
   wageInput: unknown,
-): Promise<OfferOutcome> {
+): Promise<OfferResult> {
   const db = env.DB;
   const { session } = await requireMyActiveSession(db, env, sessionId, clubId, actor);
   // v6.49.0 运营时刻表：签约谈判自己的时段（报工资 = 谈判的推进动作）
@@ -476,11 +468,6 @@ export async function offerWage(
   }
   await settleActiveSession(env, session, null, 'record', actor, { attemptNo, wage, eff, result: 'fail', feedback: satisfaction, risk });
   return { result: 'fail', attemptNo, remaining: ctx.maxAttempts - attemptNo, satisfaction, risk };
-}
-
-export interface WageForecast {
-  forecast: string;
-  risk: boolean;
 }
 
 // 四档档位文案与 0.2/0.5/0.8 边界已挪到 negotiation-secret.ts（v6.54.0：闹涨薪的还价预览
@@ -592,7 +579,7 @@ export async function chooseTrainee(
   sessionId: number,
   clubId: number,
   actor: number | null,
-): Promise<{ ok: true; result: 'trainee'; wage: number; message: string }> {
+): Promise<TraineeSignResult> {
   const db = env.DB;
   const { session, transfer } = await requireMyActiveSession(db, env, sessionId, clubId, actor);
   // v6.49.0 运营时刻表：签约谈判自己的时段（选训练营合同 = 谈判的推进动作）
@@ -719,13 +706,6 @@ export interface MySessionsOpts {
   endedLimit?: number;
 }
 
-export interface MySessionsResult {
-  sessions: unknown[];
-  ended: unknown[];
-  /** 还有更早的已结束会话时给下一页的游标，否则 null */
-  endedNextBefore: number | null;
-}
-
 // 静默截止的锚点：到期引擎、谈判列表倒计时与球员转会浮层共用这一个表达式（v6.65.2 起上移到列表常量之前）
 export const SILENT_ANCHOR_SQL = `MAX(COALESCE(s.expiry_anchor_at, ''), COALESCE(s.created_at, ''),
              COALESCE((SELECT MAX(a.created_at) FROM negotiation_attempts a WHERE a.session_id = s.id), ''))`;
@@ -746,14 +726,14 @@ const SESSION_JOINS = `FROM negotiation_sessions s
 interface SessionListRow {
   id: number;
   transfer_id: number;
-  status: string;
+  status: 'active' | 'settled' | 'cancelled';
   release_fee: number | null;
   expected_wage: number | null;
   attempt_count: number;
   settled_wage: number | null;
   settle_source: string | null;
   settled_at: string | null;
-  transfer_type: string;
+  transfer_type: TransferType;
   transfer_status: string;
   fee: number | null;
   transfer_snapshot: string | null;
@@ -771,7 +751,7 @@ interface SessionListRow {
   silent_anchor: string;
 }
 
-export async function listMySessions(env: Env, clubId: number, opts: MySessionsOpts = {}): Promise<MySessionsResult> {
+export async function listMySessions(env: Env, clubId: number, opts: MySessionsOpts = {}): Promise<MyNegotiations> {
   const db = env.DB;
   const ctx = await loadNegotiationContext(db);
   const endedLimit = opts.endedLimit ?? 10;
@@ -853,7 +833,7 @@ export async function listMySessions(env: Env, clubId: number, opts: MySessionsO
     endedPage.results.filter((r) => r.status === 'cancelled').map((r) => r.id),
   );
 
-  const toDto = (r: SessionListRow, attempts: AttemptListRow[], voidReason: string | null) => {
+  const toDto = (r: SessionListRow, attempts: AttemptListRow[], voidReason: string | null): NegotiationSession => {
     const last = attempts[attempts.length - 1] ?? null;
     let lastSatisfaction: string | null = null;
     let lastRisk = false;

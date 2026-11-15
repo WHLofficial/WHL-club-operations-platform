@@ -14,9 +14,9 @@ import {
   GROWTH_TIER_CONDITIONS,
   GROWTH_TIER_SELECT,
   GROWTH_TIER_SQL,
-  type GrowthTierConditionKey,
 } from '../core/growth-tier.ts';
 import { rowDisplayName } from '../core/player-name.ts';
+import type { TierDiffRow } from '../contract/batch2.ts';
 
 function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
@@ -35,16 +35,6 @@ export type TierScope =
   | { kind: 'fcIds'; fcIds: number[] }
   | { kind: 'clubs'; clubIds: number[] }
   | { kind: 'all' };
-
-export interface TierDiffRow {
-  playerId: number;
-  name: string;
-  clubId: number | null;
-  clubName: string | null;
-  currentTier: number;
-  nextTier: number;
-  conditions: Record<GrowthTierConditionKey, boolean>;
-}
 
 export interface TierRecomputeSummary {
   scope: TierScope['kind'];

@@ -9,6 +9,7 @@ import { queueClubNotification } from './notify.ts';
 import { matchPrizeStatements } from './prizes.ts';
 import { matchAttendanceStatements } from './home.ts';
 import { createConfigService } from '../core/config.ts';
+import type { ConfirmedResultRow, ResultQueueRow, ResultsQueue } from '../contract/batch4.ts';
 
 function nowSql() {
   return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
@@ -54,41 +55,6 @@ export const MATCH_SELECT = `
   LEFT JOIN entry ew ON ew.id = m.winner_entry_id
   LEFT JOIN team tw ON tw.id = ew.team_id`;
 
-export interface ResultQueueItem {
-  matchId: number;
-  season: number;
-  competitionType: string | null;
-  stageName: string | null;
-  round: number | null;
-  homeTeam: string | null;
-  awayTeam: string | null;
-  scoreHome: number | null;
-  scoreAway: number | null;
-  penHome: number | null;
-  penAway: number | null;
-  walkoverSide: string | null;
-  winnerTeam: string | null;
-  finishedAt: string | null;
-}
-
-export interface ConfirmedResultItem {
-  id: number;
-  matchId: number;
-  season: number;
-  windowSeq: number;
-  competitionType: string | null;
-  stageName: string | null;
-  round: number | null;
-  homeTeam: string | null;
-  awayTeam: string | null;
-  scoreHome: number | null;
-  scoreAway: number | null;
-  winnerTeam: string | null;
-  confirmedAt: string;
-  needsReview: boolean;
-  reviewNote: string | null;
-}
-
 function toConfirmedItem(r: {
   id: number;
   match_id: number;
@@ -105,7 +71,7 @@ function toConfirmedItem(r: {
   confirmed_at: string;
   needs_review: number;
   review_note: string | null;
-}): ConfirmedResultItem {
+}): ConfirmedResultRow {
   return {
     id: r.id,
     matchId: r.match_id,
@@ -126,10 +92,10 @@ function toConfirmedItem(r: {
 }
 
 // 待确认队列：绑定的全部赛事（赛季级绑定，v0.7.1 修订）→ 该赛事 finished 场次，剔除已确认；每赛事硬 LIMIT（§17）
-export async function queueResults(env: Env): Promise<{ queue: ResultQueueItem[]; confirmed: ConfirmedResultItem[] }> {
+export async function queueResults(env: Env): Promise<ResultsQueue> {
   const pending = await scanPendingMatches(env);
 
-  const queue: (ResultQueueItem & { _sortKey: string })[] = pending.map(({ m, season, competitionType }) => ({
+  const queue: (ResultQueueRow & { _sortKey: string })[] = pending.map(({ m, season, competitionType }) => ({
     matchId: m.id,
     season,
     competitionType,
@@ -200,7 +166,7 @@ export async function confirmResult(
   matchIdInput: unknown,
   origin: AuditOrigin,
 ): Promise<{
-  result: ConfirmedResultItem;
+  result: ConfirmedResultRow;
   xp: XpHookSummary;
   xpError: string | null;
   notifyError: string | null;
@@ -421,7 +387,7 @@ export async function autoConfirmResults(env: Env, cap = 20): Promise<AutoConfir
 
 /** 重放已确认场次的三钩子（v2.7.0，幂等：XP UNIQUE 锚 / 奖金账本闸 / 上座主键），并重算复核标记。
  *  通知钩子不重放（notifications 无去重锚，重排队会重复打扰用户）；原确认时通知失败的话信号保留在复核标记里。 */
-export async function replayHooksForMatch(env: Env, matchIdInput: unknown): Promise<ConfirmedResultItem> {
+export async function replayHooksForMatch(env: Env, matchIdInput: unknown): Promise<ConfirmedResultRow> {
   const matchId = Number(matchIdInput);
   if (!Number.isInteger(matchId) || matchId <= 0) throw new HttpError(400, '比赛 ID 不对');
   const row = await env.DB.prepare(

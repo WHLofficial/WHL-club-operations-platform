@@ -22,8 +22,7 @@
 //   · routes/offers.ts：OffersListResponse / OfferDetailResponse / OfferSettingsDto 两端点 +
 //     五个动作回执的 c.json 泛型
 // 锚点待落登记（真源文件不在本批五文件白名单，留待脚本统一收口 / 后续批次，本批不越界）：
-//   NegotiationSession / MyNegotiations / ReleaseFeeResult / OfferResult（worker 内部名
-//   OfferOutcome）/ TraineeSignResult ← negotiations.ts；SeaSignEligibility / SeaCompRow /
+//   SeaSignEligibility / SeaCompRow /
 //   SeaComps ← routes/players.ts（PlayerDetail.seaSign / seaComps 内嵌形状）；SeaExtendResult ←
 //   routes/admin/sea-sealed.ts（extendSeaBatch 的路由层映射）；MatchDecisionResult ←
 //   activations.ts（worker 内部名 MatchResult）；TransferType 是 transfers.type 的 DB 写值联合

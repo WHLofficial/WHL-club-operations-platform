@@ -14,7 +14,6 @@
 // 锚点缺口（登记 registered，生产者在批 2 文件白名单外，契约已建、api 已转发）：
 //   · SquadOverview / SquadPlayerRow / SquadRules / SquadCompliance / SquadIssue / SquadNumbersResponse /
 //     NumberConflict ← routes/registration.ts（GET /api/club/squad、PUT /api/club/squad/numbers）
-//   · TierDiffRow ← worker/growth-tier.ts（经 routes/admin/growth-tier.ts 的 c.json 泛型传导检查）
 //   · PlayerMatchesCompStat / Season / Item ← core/player-matches.ts + worker/player-matches.ts
 //     （经 routes/players.ts 的 c.json<PlayerMatchesResponse> 传导检查）
 //   · PendingContractsResponse 已在第 1 批契约（batch1.ts）单源，本批只转发不重复定义。

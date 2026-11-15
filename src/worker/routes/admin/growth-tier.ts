@@ -28,7 +28,7 @@ import { nationName } from '../../../core/nations.ts';
 import { clubsWithoutCountry, hookTierRecompute, recomputeGrowthTiers, type TierScope } from '../../growth-tier.ts';
 import { nowSql, readJson } from './shared.ts';
 // 契约类型锚点（v6.82.0 第 2 批）：档位四端点的响应装配以 src/contract/batch2.ts 为真源标注；
-// TierDiffRow 的形状真源在 worker/growth-tier.ts（白名单外），经这里的 c.json 泛型传导检查。
+// TierDiffRow 形状真源已归 contract/batch2.ts（v6.86.0），worker/growth-tier.ts import 契约。
 import type { TierChangeEntry, TierClubWithoutCountry, TierPlayerDetail, TierRecomputeSummary } from '../../../contract/batch2.ts';
 
 const app = new Hono<{ Bindings: Env }>();

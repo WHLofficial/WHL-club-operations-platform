@@ -39,8 +39,8 @@
 //     本文件不建、api 手抄原地保留，避免双真源
 //   · §6.8 漏审补录六型（随批补甄别）：TournamentRow / BindTournamentResult / ResultQueueRow /
 //     ConfirmedResultRow / ResultsQueue / ConfirmResultResult（season 域绑定与赛果队列装配，
-//     装配点 routes/admin/seasons.ts 在本批白名单内；ResultQueueItem / ConfirmedResultItem 是
-//     worker/results.ts 内部名——results.ts 在白名单外，内部名不动只登记）
+//     装配点 routes/admin/seasons.ts 在本批白名单内；worker/results.ts 已换用本文件契约名
+//     （v6.86.0 锚点收口，内部名 ResultQueueItem / ConfirmedResultItem 退役）
 
 // ---------------------------------------------------------------------------
 // 球队页（v3.4.0）：列表 / 详情 / 排名（GET /api/clubs、/api/clubs/:id、/api/clubs/:id/standing）
@@ -459,8 +459,8 @@ export interface StageSettleResult {
 
 // ---------------------------------------------------------------------------
 // §6.8 漏审补录（随批补甄别）：赛事绑定下拉 / 绑定回执 / 赛果队列三型 / 确认回执
-// worker 真源：routes/admin/seasons.ts:169-187 装配 + worker/results.ts 内部名
-// ResultQueueItem / ConfirmedResultItem（results.ts 在本批白名单外，内部名不动、只登记命名差）
+// worker 真源：routes/admin/seasons.ts:169-187 装配 + worker/results.ts（v6.86.0 起直接 import
+// 本文件契约名，内部名 ResultQueueItem / ConfirmedResultItem 退役）
 // ---------------------------------------------------------------------------
 
 /** 赛事下拉行（GET /api/admin/tournaments，TOUR_DB tournament 表只读跨库；wrap {tournaments}）。 */

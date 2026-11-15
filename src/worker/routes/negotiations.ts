@@ -12,6 +12,8 @@ import { waitUntilOf } from '../../lib/guard.ts';
 import { getBoundClub, assertTradable } from '../binding.ts';
 import { settleOverdue } from '../market-settle.ts';
 import { chooseTrainee, listMySessions, offerWage, previewWage, submitReleaseFee } from '../negotiations.ts';
+import type { WageForecast } from '../../contract/batch1.ts';
+import type { MyNegotiations, OfferResult, ReleaseFeeResult, TraineeSignResult } from '../../contract/batch5.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -56,7 +58,7 @@ app.get('/', async (c) => {
     if (!Number.isInteger(n) || n <= 0) throw new HttpError(400, '已结束区每页条数不对');
     endedLimit = Math.min(50, n);
   }
-  return c.json(await listMySessions(c.env, clubId, { endedBefore, endedLimit }));
+  return c.json<MyNegotiations>(await listMySessions(c.env, clubId, { endedBefore, endedLimit }));
 });
 
 app.post('/:transferId/release-fee', async (c) => {
@@ -65,7 +67,7 @@ app.post('/:transferId/release-fee', async (c) => {
   if (!Number.isInteger(transferId)) throw new HttpError(400, '转会单 ID 不对');
   const body = (await c.req.raw.json().catch(() => null)) as { fee?: unknown } | null;
   const result = await submitReleaseFee(c.env, transferId, clubId, user.id, body?.fee);
-  return c.json(result);
+  return c.json<ReleaseFeeResult>(result);
 });
 
 app.post('/:sessionId/offer', async (c) => {
@@ -73,7 +75,7 @@ app.post('/:sessionId/offer', async (c) => {
   const sessionId = Number(c.req.param('sessionId'));
   if (!Number.isInteger(sessionId)) throw new HttpError(400, '谈判会话 ID 不对');
   const body = (await c.req.raw.json().catch(() => null)) as { wage?: unknown } | null;
-  return c.json(await offerWage(c.env, sessionId, clubId, user.id, body?.wage));
+  return c.json<OfferResult>(await offerWage(c.env, sessionId, clubId, user.id, body?.wage));
 });
 
 app.post('/:sessionId/preview', async (c) => {
@@ -81,14 +83,14 @@ app.post('/:sessionId/preview', async (c) => {
   const sessionId = Number(c.req.param('sessionId'));
   if (!Number.isInteger(sessionId)) throw new HttpError(400, '谈判会话 ID 不对');
   const body = (await c.req.raw.json().catch(() => null)) as { wage?: unknown } | null;
-  return c.json(await previewWage(c.env, sessionId, clubId, user.id, body?.wage));
+  return c.json<WageForecast>(await previewWage(c.env, sessionId, clubId, user.id, body?.wage));
 });
 
 app.post('/:sessionId/trainee', async (c) => {
   const { user, clubId } = await requireTradableCoachClub(c.env, c.req.raw);
   const sessionId = Number(c.req.param('sessionId'));
   if (!Number.isInteger(sessionId)) throw new HttpError(400, '谈判会话 ID 不对');
-  return c.json(await chooseTrainee(c.env, sessionId, clubId, user.id));
+  return c.json<TraineeSignResult>(await chooseTrainee(c.env, sessionId, clubId, user.id));
 });
 
 export default app;
