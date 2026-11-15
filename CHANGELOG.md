@@ -4,6 +4,20 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.86.0] · worker 响应锚点收口（contract anchor closeout，type-only）（2026-11-15，本地待推送）
+
+**Changed**
+
+- 契约真源收口：六组 worker 响应装配点全部钉到 `src/contract/`（`c.json<契约型>` 泛型 / 函数返回标注 / 删本地重复定义改 import），判据 = 「契约改一个字段 ⇒ worker tsc 必红」，由 `tests/contract-anchor-lock.test.ts` 源码锁（13 个受锁文件）钉住形态不回退。
+- spec ①：batch4 补 `ReplayHooksResult { ok: true; result: ConfirmedResultRow }`，seasons.ts replay-hooks 端点挂泛型 + api.ts re-export。
+- spec ②：batch2 补 `SquadNumberUpdateResponse { ok: true; id: number; number: string | null }`（POST /api/club/players/:id/number 单条改号回执），生产者清单括注补登端点；registration.ts 挂泛型；Player.tsx 与转会台 NegotiationsSection.tsx 两调用点换契约型——NegotiationsSection 手抄错型 `{ ok: boolean; number: number }` 退役（实际载荷 number 为 string|null，仅模板插值消费，运行时零变化）。
+- lock test 两态锁按源码现实自动切终态分支；两态探针改钉泛型特征串（防注释提及该型名误切）。
+
+**Verification**
+
+- 运行时零变化：响应字段不增删、不改值、不改文案；零迁移、零生产写、零新增端点；build 产物 36 资产 hash 前后逐文件一致。
+- `npm run typecheck` 三份清；`npx vitest run` **214 文件 / 3301 例**全绿（tests/ 唯一改动 lock test，11/11）；变异 M1–M10 全量执行、逐式还原（M2/M4/M5 预期按实测订正，见测试计划 §4/§9）。
+
 ## [v6.85.2] · 冠名首窗在签约/接班时即发（2026-11-14，已上线 Version 4553fb98）
 
 **上线**：push `aad4602..61f27c8`，CF Workers Builds 自动部署 Version `4553fb98-f5ee-4cfc-9bb2-47d8ac1f14dd` @2026-11-14T06:02:28Z；线上 `/api/health` 200、入口 `assets/index-Cm3GI6vT.js`、包内版本串 `6.85.2`。存量里昂合同（id=1，club 66）已补首窗：`windows_remaining 6→5`、`naming_fee +9.251`（`ref_type='offer'`, `ref_id=2`）、审计 `naming_first_fee_backfill` 1 条。

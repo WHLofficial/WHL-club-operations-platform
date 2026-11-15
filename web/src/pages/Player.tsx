@@ -18,6 +18,7 @@ import {
   type PlayerDetail,
   type PlayerMatchesResponse,
   type PlayerTransfersResponse,
+  type SquadNumberUpdateResponse,
   type TierConditionDetail,
   type UpgradePlanDto,
 } from '../lib/api.ts';
@@ -324,7 +325,7 @@ export default function Player() {
     if (numberBusy) return;
     setNumberBusy(true);
     try {
-      const res = await apiPost<{ ok: boolean; number: string | null }>(`/api/club/players/${player.id}/number`, {
+      const res = await apiPost<SquadNumberUpdateResponse>(`/api/club/players/${player.id}/number`, {
         number: raw === '' ? null : Number(raw),
       });
       show(res.number === null ? '球衣号已清空。' : `球衣号定为 ${res.number} 号。`);

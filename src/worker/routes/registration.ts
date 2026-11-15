@@ -18,7 +18,7 @@ import { influenceCoefs, influenceOf } from '../influence.ts';
 import { createAuditStatement } from '../../lib/audit.ts';
 import { loadClubPendingChanges } from '../demand-ops.ts';
 // 契约锚点（v6.86.0）：主响应 / 号码批量回执 / 409 冲突明细以 src/contract/batch2.ts 为真源
-import type { NumberConflict, SquadNumbersResponse, SquadOverview } from '../../contract/batch2.ts';
+import type { NumberConflict, SquadNumberUpdateResponse, SquadNumbersResponse, SquadOverview } from '../../contract/batch2.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -471,7 +471,7 @@ app.post('/club/players/:id/number', async (c) => {
   }
   await writeNumberAssignments(c.env, user.id, club.id, applied);
 
-  return c.json({ ok: true, id: playerId, number: assignment.number });
+  return c.json<SquadNumberUpdateResponse>({ ok: true, id: playerId, number: assignment.number });
 });
 
 export default app;

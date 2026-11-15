@@ -82,6 +82,7 @@ export type {
   PlaystyleDetailRow,
   SquadCompliance,
   SquadIssue,
+  SquadNumberUpdateResponse,
   SquadNumbersResponse,
   SquadOverview,
   SquadPlayerRow,

@@ -12,7 +12,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { apiPost, type NegotiationSession, type OfferResult, type ReleaseFeeResult, type TraineeSignResult } from '../../../lib/api.ts';
+import { apiPost, type NegotiationSession, type OfferResult, type ReleaseFeeResult, type SquadNumberUpdateResponse, type TraineeSignResult } from '../../../lib/api.ts';
 import { IdTag } from '../../../components/IdTag.tsx';
 import { useToast } from '../../../lib/toast.tsx';
 import { useMyClub, useMyNegotiations, useWagePreview, qk } from '../../../lib/queries.ts';
@@ -304,7 +304,7 @@ function NumberPrompt({
     if (busy || number === '') return;
     setBusy(true);
     try {
-      const res = await apiPost<{ ok: boolean; number: number }>(`/api/club/players/${player.id}/number`, {
+      const res = await apiPost<SquadNumberUpdateResponse>(`/api/club/players/${player.id}/number`, {
         number: Number(number),
       });
       show(`${player.name} 定为 ${res.number} 号。`);

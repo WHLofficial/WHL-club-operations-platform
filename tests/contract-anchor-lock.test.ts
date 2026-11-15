@@ -285,12 +285,13 @@ describe('growth-tier 契约锚点锁', () => {
 describe('registration 契约锚点锁', () => {
   it('batch2 契约锚点两态锁：spec ② 施工后锁终态四型，施工前锁现状缺口（landed 探测自动切换）', () => {
     const text = src(FILES.registration);
-    // 两态开关：源码含 SquadNumberUpdateResponse = spec ② 已施工。两分支各自把对应形态逐字锁死——
+    // 两态开关：源码含单条改号泛型特征串（c.json<SquadNumberUpdateResponse>，非裸名——注释里提及
+    // 该型名不会误切，评审定稿）= spec ② 已施工。两分支各自把对应形态逐字锁死——
     // 施工前有人乱动现状 → 现状分支红；施工落地即自动切终态分支（零人工改锁），此后再回退 → 终态分支红；
     // 半施工态（只改 import 不加泛型 / 只改 :474 不动 web）落进终态分支按缺的那半红。门禁口径：
     // 锁必须与工作区现实自洽，施工切片未落地时终态判据不得挂成活红（TC-REG-01① 的「三名版不作
     // 施工后断言」只约束施工后时点，施工前作现状断言不在其禁）。
-    const landed = text.includes('SquadNumberUpdateResponse');
+    const landed = text.includes('c.json<SquadNumberUpdateResponse>');
     // SquadOverview：主响应顶层泛型（players/rules/issues/compliance 等子对象全靠它传导）——两态同锁
     expect(text, 'registration:SquadOverview 主响应泛型').toContain('return c.json<SquadOverview>({');
     // SquadPlayerRow：players.map 字面量随顶层泛型传导（不另起局部变量）
@@ -448,9 +449,10 @@ describe('players 既有锚点复核锁', () => {
 describe('锁判据自检（错一个字必须不匹配，防恒真）', () => {
   it('每组抽代表锚点错一字后，在对应源码里必须失配', () => {
     // 逐组代表锚点：覆盖「契约 import」「返回标注」「泛型」「收窄字段」「传导」「既有锚点」六类判据
-    // registration 单条回执样本随施工态切换（与 registration 组两态锁同一开关）：终态泛型串 / 施工前裸串，
+    // registration 单条回执样本随施工态切换（与 registration 组两态锁同一开关，同钉泛型特征串
+    // 而非裸名——注释提及该型名不误切）：终态泛型串 / 施工前裸串，
     // 两串在对应态的真实源码里各自在场，错一字都必须失配
-    const regLanded = src(FILES.registration).includes('SquadNumberUpdateResponse');
+    const regLanded = src(FILES.registration).includes('c.json<SquadNumberUpdateResponse>');
     const samples: { file: string; expected: string; label: string }[] = [
       {
         file: FILES.negotiations,
