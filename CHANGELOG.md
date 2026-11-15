@@ -4,19 +4,25 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
-## [v6.86.0] · worker 响应锚点收口（contract anchor closeout，type-only）（2026-11-15，本地待推送）
+## [v6.86.0] · worker 响应锚点收口（contract anchor closeout，type-only）（2026-11-15，未 push）
 
 **Changed**
 
-- 契约真源收口：六组 worker 响应装配点全部钉到 `src/contract/`（`c.json<契约型>` 泛型 / 函数返回标注 / 删本地重复定义改 import），判据 = 「契约改一个字段 ⇒ worker tsc 必红」，由 `tests/contract-anchor-lock.test.ts` 源码锁（13 个受锁文件）钉住形态不回退。
+- 六组 worker 响应锚点收口，全部钉到 `src/contract/`（`c.json<契约型>` 泛型 / 函数返回标注 / 删本地重复定义改 import），判据 = 「契约改一个字段 ⇒ worker tsc 必红」：negotiations 五型换源 batch1/batch5 + `MyNegotiations`（`SessionListRow.status` 三值 / `transfer_type` 八成员按谈判可见值域收窄，本地重复定义退役）；results 命名差 D（`ResultQueueItem`/`ConfirmedResultItem` 内部名退役，`ResultQueueRow`/`ConfirmedResultRow`/`ResultsQueue` 换源 batch4）；growth-tier `TierDiffRow` 删本地定义改 import batch2；registration 七型（主响应 `c.json<SquadOverview>` 与批量 `c.json<SquadNumbersResponse>` 两顶层锚 + `NumberConflict` 换源）；sea-sealed 四路路由泛型；players 复核已落（既有锚零改动）。形态由源码锁钉住不回退。
 - spec ①：batch4 补 `ReplayHooksResult { ok: true; result: ConfirmedResultRow }`，seasons.ts replay-hooks 端点挂泛型 + api.ts re-export。
 - spec ②：batch2 补 `SquadNumberUpdateResponse { ok: true; id: number; number: string | null }`（POST /api/club/players/:id/number 单条改号回执），生产者清单括注补登端点；registration.ts 挂泛型；Player.tsx 与转会台 NegotiationsSection.tsx 两调用点换契约型——NegotiationsSection 手抄错型 `{ ok: boolean; number: number }` 退役（实际载荷 number 为 string|null，仅模板插值消费，运行时零变化）。
 - lock test 两态锁按源码现实自动切终态分支；两态探针改钉泛型特征串（防注释提及该型名误切）。
 
+**Added**
+
+- `tests/contract-anchor-lock.test.ts`：worker 响应锚点源码锁（`readFileSync` + 空白归一化逐字断言 + 防假绿计数 + registration 主响应与空态分支两枚金样，11 例），受锁文件 13 个（含 web 消费侧 5 文件）。
+- `AGENTS.md` 锚点规则：「worker 端点响应一律用契约类型锚定——`c.json<契约型>` 或函数返回标注；契约字段变动必须在 worker 侧编译期暴露，禁止 `as`/`any`/`@ts-ignore` 绕过」。
+
 **Verification**
 
-- 运行时零变化：响应字段不增删、不改值、不改文案；零迁移、零生产写、零新增端点；build 产物 36 资产 hash 前后逐文件一致。
-- `npm run typecheck` 三份清；`npx vitest run` **214 文件 / 3301 例**全绿（tests/ 唯一改动 lock test，11/11）；变异 M1–M10 全量执行、逐式还原（M2/M4/M5 预期按实测订正，见测试计划 §4/§9）。
+- type-only 运行时零变化：响应字段不增删、不改值、不改文案；零迁移、零生产写、零新增端点；build 产物 36 资产 hash 前后逐文件一致。
+- `npm run typecheck` 三份清；`npx vitest run` **214 文件 / 3301 例**全绿（tests/ 唯一改动 lock test，11/11）；变异 10 式逐式弄坏即还原（M1–M6 与 M9 红点随收口材料在案，M2/M4/M5 预期按实测订正；M7/M8/M10 补跑记录见测试计划 §9.3）。
+- 未 push（增量提交 `88023d3..7833678` 六枚，HEAD `7833678`）。
 
 ## [v6.85.2] · 冠名首窗在签约/接班时即发（2026-11-14，已上线 Version 4553fb98）
 
