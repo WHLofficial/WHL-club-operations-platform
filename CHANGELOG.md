@@ -4,7 +4,7 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
-## [v6.87.0] · players.status 写侧收编（转移表 + 唯一入口 + 三处还原 bug 修复）（2026-11-16，本地未 push）
+## [v6.87.0] · players.status 写侧收编（转移表 + 唯一入口 + 三处还原 bug 修复）（2026-11-16，已上线 Version 7e2fc367）
 
 **Added**
 
@@ -27,8 +27,9 @@
 **Verification**
 
 - 零迁移、零生产写、零新增端点；除三处 Fixed 外运行时零变化。
-- typecheck 三份清（施工轮口径；收口复核自跑 worker tsc exit 0）；vitest 批 1 收口移交实测 **216 文件 / 3324 例（1 failed / 3323 passed）**——失败文件未随移交输出、评审 finding 1 记「全套绿」口径并存，评审修复 +14 例后的全套复跑未随移交、收口未复跑全套；变异逐式见 ROADMAP v6.87.0 节验收（施工轮 M1–M6：M1/M3/M4/M5 各按预期红、M2/M6 死代码未命中；修复轮重放 M1 4 红 / M2 3 红 + 新锁 M-A/M-B 各恰红后还原全绿）；红测先行 B1/B2/B3 改码前 3 failed → 修复后 56/56；测试计划 `docs/test-plans/v6.87.0-player-ops-state.md`（§8 偏差 10 条 + §10 评审修复记录 + 末尾「实际交付对照」）。
-- 未 push；评审第 1 轮 5 条 finding 全处置（ROADMAP v6.87.0 节）。
+- typecheck 三份清；vitest 收口复跑 **216 文件 / 3338 例全绿**（162s；= 批 1 移交 3324 例 + 评审修复 14 例，先前移交的 1 failed 未复现）；变异逐式见 ROADMAP v6.87.0 节验收（施工轮 M1–M6：M1/M3/M4/M5 各按预期红、M2/M6 死代码未命中；修复轮重放 M1 4 红 / M2 3 红 + 新锁 M-A/M-B 各恰红后还原全绿）；红测先行 B1/B2/B3 改码前 3 failed → 修复后 56/56；测试计划 `docs/test-plans/v6.87.0-player-ops-state.md`（§8 偏差 10 条 + §10 评审修复记录 + 末尾「实际交付对照」）。
+- e2e 收口轮 **24/29**，失败 5 项与 v6.86.0 时逐项一致（④双翻页条、⑤c转会台、⑲教练态、⑪前端错误、⑳收件篮；均为本地夹具/断言漂移，本版零 web 运行时改动，无新增失败）。
+- 已 push origin/main（`4305f5a..e86ddb2`），CF 部署 **Version `7e2fc367-b577-4d4e-a938-adbb71cf4341`**（2026-11-15T23:53:23Z）；生产回读 `/api/health` + players/listings/clubs/squads 五端点全 200，线上入口 `assets/index-BS46rYEw.js` 与本地 dist 一致（含 6.87.0 版本串）。评审第 1 轮 5 条 finding 全处置（ROADMAP v6.87.0 节）。
 
 ## [v6.86.0] · worker 响应锚点收口（contract anchor closeout，type-only）（2026-11-15，已上线 Version aa1a7e04）
 
