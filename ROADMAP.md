@@ -134,7 +134,7 @@
 
 ---
 
-## v6.87.1 · 测试补锁批：挂牌缺口与契约源码锁（2026-11-20，本地未 push）
+## v6.87.1 · 测试补锁批：挂牌缺口与契约源码锁（2026-11-20，已上线 Version d687506b）
 
 - **范围**：v6.83 测试计划 §9.2 未落地 7 例中的 6 例 + M5–M11；v6.82 契约锁 TC-LOCK-01…08 + MV-01…10。纯测试增量，零 `src/`/`web/` 运行时改动。
 - **A 组**：`tests/listing-state.test.ts` +6 例（TC-MX-10 / ORD-02 / SRC-04 / TRG-01 / TRG-02 / TRG-04②）；`tests/market-routes.test.ts` +2 例（TC-TRG-04①/③）。TC-TRG-04① 用 `matched_pending` + 未来 `match_deadline` 隔离 `settleOverdue` 抢先；③ 按 batch 分组断言批内下标 4。
