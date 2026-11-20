@@ -4,6 +4,25 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.87.1] · 测试补锁批：挂牌缺口 6 例 + 契约源码锁 14 例（2026-11-20，本地未 push）
+
+**Added**
+
+- `tests/listing-state.test.ts`：『v6.87.1 补锁 · 挂牌收口缺口』6 例——TC-MX-10（fromStatus 参数维度）、TC-ORD-02（settle 整批 transfer/review_task 幂等）、TC-SRC-04（非 status 写入反向锁）、TC-TRG-01/02（过期冻结触发器、激活首价窗三分支）、TC-TRG-04②（批内回滚）。
+- `tests/market-routes.test.ts`：『v6.87.1 补锁 · first_bid 批序与截止拒绝』2 例——TC-TRG-04①（端点 409 `bid_deadline_passed`、无冻结行）与③（listings 语句在含它的 batch 内下标=4）。
+- `tests/contract-source-lock.test.ts`：TC-LOCK-01…08 共 14 例——273 声明 + 7 core 转发 = 280 与 api.ts 0 差、纯类型约束、43 锚点、AGENTS 契约纪律行、web 零手抄、core 单源三型、六个联合逐字锁、30–40 行漂移处置；同时锁住 MV-04/MV-06 初跑假绿的两处整文件互保（接口体逐字段、纪律行四词逐行）。
+- `docs/test-plans/v6.87.1-test-backfill.md`：范围、A/B 交付、M5–M11 与 MV-01…10 变异结果、验收数字、偏差与风险。
+
+**Verification**
+
+- typecheck 三份全清；vitest **217 文件 / 3360 例全过**（基线 216/3338，本批 +22 例）。
+- A 组变异 M5–M11 全命中；B 组 MV-01…10 全命中（MV-04/06 加固后命中）。
+- 零 `src/`、零 `web/` 运行时改动。
+
+**Registered**
+
+- TC-ORD-03（改码前后五表历史金样）因前态不可回溯未实施；当前态六链替代方案亦未写，登记进测试计划 §5，需严格历史等价时应在临时 worktree 检出 `81c3f4d^` 取基线。
+
 ## [v6.87.0] · players.status 写侧收编（转移表 + 唯一入口 + 三处还原 bug 修复）（2026-11-16，已上线 Version 7e2fc367）
 
 **Added**

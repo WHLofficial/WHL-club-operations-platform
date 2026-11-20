@@ -1155,3 +1155,46 @@ describe('v6.87.0 批 1 红测：自由身强拍还原 free', () => {
     expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM players WHERE id = 12')?.status).toBe('free');
   });
 });
+
+// v6.87.1 测试补锁：TC-TRG-04 的端点侧与批内下标。
+// ②（绕预检直跑批 + 整批回滚）在 tests/listing-state.test.ts 的 TC-TRG-04②。
+describe('v6.87.1 补锁 · first_bid 批序与截止拒绝', () => {
+  it('TC-TRG-04①：截止后的出价端点 409 bid_deadline_passed，且不落 fund_holds', async () => {
+    const fx = freshEnv();
+    const mf = await seedMarket(fx);
+    await listPlayer(mf, 10, 15);
+    // 用 matched_pending + 未来 match_deadline 隔离出价预检：若停在 bidding，端点会先被
+    // settleOverdue 惰性结算成 pending_review，测不到 :1148 的 deadline 预检分支。
+    fx.sqlite.exec(
+      `UPDATE listings SET status = 'matched_pending', deadline_at = '2000-01-01T00:00:00.000Z',
+         match_deadline = '2999-01-01T00:00:00.000Z' WHERE id = 1`,
+    );
+    const res = await post('/api/market/listings/1/bids', { amount: 15 }, 'tok-coach2', fx.env);
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { code?: string }).code).toBe('bid_deadline_passed');
+    expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM fund_holds')?.n).toBe(0);
+  });
+
+  it('TC-TRG-04③：first_bid 的 listings 语句固定在批内下标 4（机械不变量，不靠行为面）', async () => {
+    const fx = freshEnv();
+    const mf = await seedMarket(fx);
+    await listPlayer(mf, 10, 15);
+    const batches: string[][] = [];
+    const wrapped = {
+      prepare(input: string) {
+        return fx.env.DB.prepare(input);
+      },
+      async batch(statements: D1PreparedStatement[]) {
+        batches.push(statements.map((stmt) => (stmt as unknown as { sqlText?: string }).sqlText ?? ''));
+        return fx.env.DB.batch(statements);
+      },
+    } as unknown as D1Database;
+    const res = await post('/api/market/listings/1/bids', { amount: 15 }, 'tok-coach2', { ...fx.env, DB: wrapped });
+    expect(res.status).toBe(201);
+    const hits = batches
+      .flatMap((texts, batchIndex) => texts.map((text, index) => ({ text, batchIndex, index })))
+      .filter((entry) => entry.text.includes(`UPDATE listings SET status = 'bidding'`));
+    expect(hits).toHaveLength(1);
+    expect(hits[0]!.index).toBe(4);
+  });
+});

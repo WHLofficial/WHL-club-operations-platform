@@ -134,6 +134,15 @@
 
 ---
 
+## v6.87.1 · 测试补锁批：挂牌缺口与契约源码锁（2026-11-20，本地未 push）
+
+- **范围**：v6.83 测试计划 §9.2 未落地 7 例中的 6 例 + M5–M11；v6.82 契约锁 TC-LOCK-01…08 + MV-01…10。纯测试增量，零 `src/`/`web/` 运行时改动。
+- **A 组**：`tests/listing-state.test.ts` +6 例（TC-MX-10 / ORD-02 / SRC-04 / TRG-01 / TRG-02 / TRG-04②）；`tests/market-routes.test.ts` +2 例（TC-TRG-04①/③）。TC-TRG-04① 用 `matched_pending` + 未来 `match_deadline` 隔离 `settleOverdue` 抢先；③ 按 batch 分组断言批内下标 4。
+- **B 组**：新增 `tests/contract-source-lock.test.ts` 14 例，锁 273 声明 + 7 core 转发 = 280 与 api.ts 0 差、43 锚点、AGENTS 纪律行、web 零手抄、core 单源三型、六联合与漂移处置。
+- **变异**：M5–M11 全命中；MV-01…10 全命中，其中 MV-04（`TransferBoardRow.ca`）与 MV-06（AGENTS「唯一真源」）初跑假绿，分别加固为目标接口体逐字段断言与契约纪律行四词逐行断言后命中。
+- **验收**：typecheck 三份全清；vitest **217 文件 / 3360 例全过**（+22 例）。
+- **登记**：TC-ORD-03 历史五表金样因前态不可回溯未实施（当前态六链金样亦未写），详见 `docs/test-plans/v6.87.1-test-backfill.md` §5；需严格历史等价应在临时 worktree 检出 `81c3f4d^` 取基线。
+
 ## v6.87.0 · players.status 写侧收编：转移表 + advanceStatement 唯一入口（2026-11-16，已上线 Version 7e2fc367）
 
 **判级与缘起**：patch 等价 + 三处定向修复——18 处字面 `UPDATE players SET status` 写点（9 文件，2026-11-16 基线 grep 实测）收编为 `src/worker/player-ops.ts` 唯一入口 + `src/core/player-state.ts` 纯转移表 / resolveTarget（镜像 v6.83.0 listing 双件套分层：core = 语义真源零 IO、worker = SQL 构造器）。10 个 pure cause 的 SQL 文本、批内下标、批序契约、changes 后验逐字不变；行为变化仅限 B1/B2/B3 三处同源潜伏 bug 修正（见 Fixed）+ 两处运行时不可达的防御 free 分支 + 还原句新增 EXISTS delisted 守卫（delistUnbid P1-1 同款防幻影）。零迁移、零生产写、零 UI、零新增端点。例外 3 cause 登记不收编：revert_snapshot（快照驱动、零守卫、信任批外三闸）/ admin_set（动态白名单列拼接，retired 唯一写通道）/ retire（无生命周期写点，I4 后台手工态）。

@@ -3,6 +3,8 @@
 // 2) listing-ops SQL 守卫：合法转移 changes=1 并落到目标态，非法转移 changes=0 且整行不动；
 // 3) note 文案逐字锁（固定 5 / 参数化 3 / 置 NULL 1 / 不碰 3）与 SET 附带列逐 cause 固化。
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import type { DatabaseSync } from 'node:sqlite';
 import { advance, advanceStatement } from '../src/worker/listing-ops.ts';
 import type { ListingCloseParams } from '../src/worker/listing-ops.ts';
@@ -16,7 +18,7 @@ import { createTestDb, sqlGet } from './d1.ts';
 import type { Env } from '../src/worker/env.ts';
 import type { MarketContext } from '../src/worker/market-context.ts';
 import { adminVoidBid } from '../src/worker/market-intervene.ts';
-import { delistUnbid, voidExpiredActivation, type ListingCore } from '../src/worker/market-settle.ts';
+import { delistUnbid, settleListingForReview, voidExpiredActivation, type ListingCore } from '../src/worker/market-settle.ts';
 
 const ALL_STATUSES: readonly ListingStatus[] = ['listed', 'bidding', 'matched_pending', 'pending_review', 'delisted'];
 
@@ -655,5 +657,166 @@ describe('note 文案与附带列（逐字锁）', () => {
       expect(actual, cause).toEqual([...SET_COLUMNS[cause]].sort());
       expect(stmt.sqlText, cause).toContain(`UPDATE listings SET status = '${TARGET[cause]}'`);
     }
+  });
+});
+
+// v6.87.1 测试补锁：v6.83 挂牌收口遗留的 7 例中，可回溯的 6 例落在这里。
+// TC-ORD-03（改码前后五表金样）的「前态」已随 v6.83 上线不可回溯，按计划登记为
+// 「当前态金样不冒充历史等价」，由既有 21 例 + 全量集成测试覆盖当次等价。
+describe('v6.87.1 补锁 · 挂牌收口缺口', () => {
+  it('TC-MX-10：fromStatus 是参数维度，行状态与参数不符一律 changes=0', async () => {
+    const { sqlite, db } = createTestDb();
+    const paramsByCause = {
+      settle_for_review: ['bidding', 'matched_pending', 'listed'],
+      activation_match_start: ['listed', 'bidding'],
+    } as const;
+    let id = 2100;
+    for (const cause of ['settle_for_review', 'activation_match_start'] as const) {
+      for (const rowStatus of ['listed', 'bidding', 'matched_pending'] as const) {
+        for (const fromStatus of paramsByCause[cause]) {
+          seedListing(sqlite, id, rowStatus, { deadline_at: null, activation_deadline: null });
+          let changes: number;
+          if (cause === 'activation_match_start') {
+            if (fromStatus === 'matched_pending') continue;
+            changes = await advance(db, id, cause, { fromStatus, matchDeadline: '2030-01-01T00:00:00.000Z' });
+          } else {
+            changes = await advance(db, id, cause, { fromStatus });
+          }
+          // 只有「行状态 === 参数」才可能命中；参数本身是否在该 cause 的转移表里由 TC-MX-01 矩阵锁。
+          expect(changes, `${cause} row=${rowStatus} fromStatus=${fromStatus}`).toBe(rowStatus === fromStatus ? 1 : 0);
+          id += 1;
+        }
+      }
+    }
+  });
+
+  it('TC-ORD-02：settleListingForReview 整批建 transfer + review_task，且幂等重放返回 already', async () => {
+    const { sqlite, db } = createTestDb();
+    seedListing(sqlite, 2200, 'bidding', {
+      type: 'normal',
+      seller_club_id: 1,
+      ask_price: 10,
+      season: 2,
+      window_seq: 3,
+      deadline_at: null,
+      activation_deadline: null,
+    });
+    sqlite
+      .prepare(
+        `INSERT INTO bids (id, listing_id, club_id, amount, created_at, status, hold_id)
+         VALUES (?, ?, ?, ?, ?, 'active', NULL)`,
+      )
+      .run(1, 2200, 2, 15, '2026-01-03T00:00:00.000Z');
+    const listing: ListingCore = {
+      id: 2200,
+      player_id: 2200,
+      seller_club_id: 1,
+      type: 'normal',
+      ask_price: 10,
+      season: 2,
+      window_seq: 3,
+    };
+
+    expect(await settleListingForReview(db, listing, null, 'cron_tick', 'bidding')).toBe('settled');
+
+    const transfer = sqlGet<{ id: number; type: string; status: string; fee: number; to_club_id: number; from_club_id: number }>(
+      sqlite,
+      'SELECT id, type, status, fee, to_club_id, from_club_id FROM transfers WHERE idempotency_key = ?',
+      'listing:2200',
+    );
+    expect(transfer).toMatchObject({ type: 'transfer', status: 'pending_review', fee: 15, to_club_id: 2, from_club_id: 1 });
+    const task = sqlGet<{ id: number; type: string; ref_id: number; status: string }>(
+      sqlite,
+      'SELECT id, type, ref_id, status FROM review_tasks',
+    );
+    expect(task).toMatchObject({ type: 'transfer_confirm', ref_id: transfer?.id, status: 'open' });
+    expect(readRow(sqlite, 2200)).toMatchObject({ status: 'pending_review', deadline_at: null, match_deadline: null });
+
+    // 重放：首句 changes=0、transfer 幂等键 UNIQUE 冲突被 catch 成 already，五表不再长行
+    expect(await settleListingForReview(db, listing, null, 'cron_tick', 'bidding')).toBe('already');
+    expect(sqlGet<{ n: number }>(sqlite, 'SELECT COUNT(*) AS n FROM transfers')?.n).toBe(1);
+    expect(sqlGet<{ n: number }>(sqlite, 'SELECT COUNT(*) AS n FROM review_tasks')?.n).toBe(1);
+    expect(sqlGet<{ n: number }>(sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'listing_settle'")?.n).toBe(1);
+  });
+
+  it('TC-SRC-04：非 status 写入保留反向锁（deadline_note / bid_paused 不许被收编）', () => {
+    const settleSrc = readFileSync(fileURLToPath(new URL('../src/worker/market-settle.ts', import.meta.url).href), 'utf8');
+    expect(settleSrc).toContain('UPDATE listings SET deadline_note');
+    const adminSrc = readFileSync(fileURLToPath(new URL('../src/worker/routes/admin/market.ts', import.meta.url).href), 'utf8');
+    expect(adminSrc).toContain('SET bid_paused');
+  });
+
+  it('TC-TRG-01：过期 bidding 行上的冻结直插被触发器原子拒绝', () => {
+    const { sqlite } = createTestDb();
+    sqlite.exec(`INSERT INTO clubs (id, name) VALUES (1, 'TC-TRG-01')`);
+    sqlite.exec(`INSERT INTO ledger_accounts (club_id, balance, updated_at) VALUES (1, 100, '2026-01-01T00:00:00Z')`);
+    seedListing(sqlite, 2300, 'bidding', { deadline_at: '2000-01-01T00:00:00.000Z', activation_deadline: null });
+    expect(() =>
+      sqlite
+        .prepare(
+          `INSERT INTO fund_holds (club_id, amount, status, ref_type, ref_id, created_at)
+           VALUES (?, ?, 'held', 'listing', ?, ?)`,
+        )
+        .run(1, 10, 2300, '2026-01-03T00:00:00.000Z'),
+    ).toThrow(/WHL_BID_REJECT_DEADLINE/);
+  });
+
+  it('TC-TRG-02：激活首价窗三分支——过期+有激活方拒绝，无激活方/未来放行', () => {
+    const { sqlite } = createTestDb();
+    sqlite.exec(`INSERT INTO clubs (id, name) VALUES (1, 'TC-TRG-02 买方'), (5, 'TC-TRG-02 激活方')`);
+    sqlite.exec(`INSERT INTO ledger_accounts (club_id, balance, updated_at) VALUES (1, 100, '2026-01-01T00:00:00Z')`);
+    const insertHold = (id: number) =>
+      sqlite
+        .prepare(
+          `INSERT INTO fund_holds (club_id, amount, status, ref_type, ref_id, created_at)
+           VALUES (?, ?, 'held', 'listing', ?, ?)`,
+        )
+        .run(1, 10, id, '2026-01-03T00:00:00.000Z');
+
+    seedListing(sqlite, 2310, 'listed', {
+      deadline_at: null,
+      activation_deadline: '2000-01-01T00:00:00.000Z',
+      activated_by: 5,
+    });
+    expect(() => insertHold(2310)).toThrow(/WHL_BID_REJECT_DEADLINE/);
+
+    seedListing(sqlite, 2311, 'listed', {
+      deadline_at: null,
+      activation_deadline: '2000-01-01T00:00:00.000Z',
+      activated_by: null,
+    });
+    expect(() => insertHold(2311)).not.toThrow();
+
+    seedListing(sqlite, 2312, 'listed', {
+      deadline_at: null,
+      activation_deadline: '2099-01-01T00:00:00.000Z',
+      activated_by: 5,
+    });
+    expect(() => insertHold(2312)).not.toThrow();
+  });
+
+  it('TC-TRG-04②：绕预检直跑批，触发器失败时同批 bids 插入一并回滚', async () => {
+    const { sqlite, db } = createTestDb();
+    sqlite.exec(`INSERT INTO clubs (id, name) VALUES (1, 'TC-TRG-04 卖方'), (2, 'TC-TRG-04 买方')`);
+    sqlite.exec(`INSERT INTO ledger_accounts (club_id, balance, updated_at) VALUES (2, 100, '2026-01-01T00:00:00Z')`);
+    seedListing(sqlite, 2301, 'bidding', { deadline_at: '2000-01-01T00:00:00.000Z', activation_deadline: null });
+    await expect(
+      db.batch([
+        db
+          .prepare(
+            `INSERT INTO bids (listing_id, club_id, amount, created_at, status, hold_id)
+             VALUES (?, ?, ?, ?, 'active', NULL)`,
+          )
+          .bind(2301, 2, 10, '2026-01-03T00:00:00.000Z'),
+        db
+          .prepare(
+            `INSERT INTO fund_holds (club_id, amount, status, ref_type, ref_id, created_at)
+             VALUES (?, ?, 'held', 'listing', ?, ?)`,
+          )
+          .bind(2, 11, 2301, '2026-01-03T00:00:00.000Z'),
+      ]),
+    ).rejects.toThrow(/WHL_BID_REJECT_DEADLINE/);
+    expect(sqlGet<{ n: number }>(sqlite, 'SELECT COUNT(*) AS n FROM bids WHERE listing_id = 2301')?.n).toBe(0);
+    expect(sqlGet<{ n: number }>(sqlite, 'SELECT COUNT(*) AS n FROM fund_holds WHERE ref_id = 2301')?.n).toBe(0);
   });
 });
