@@ -209,7 +209,9 @@ export async function checkSeasonSettle(env: Env, season: number): Promise<Seaso
   const blockers: string[] = [];
   const warnings: string[] = [];
 
-  const openWindows = await db.prepare(`SELECT COUNT(*) AS n FROM season_windows WHERE season = ? AND status = 'open'`).bind(season).first<{ n: number }>();
+  // v6.88.0：closing 也算「没关完」——关窗阶段机里窗口停在 closing（run failed 待重试）时
+  // 不允许结算赛季，否则结算读到的窗内事实还在漂
+  const openWindows = await db.prepare(`SELECT COUNT(*) AS n FROM season_windows WHERE season = ? AND status IN ('open', 'closing')`).bind(season).first<{ n: number }>();
   if ((openWindows?.n ?? 0) > 0) blockers.push(`还有 ${openWindows?.n} 个窗口没关`);
 
   const pendingReviews = await db

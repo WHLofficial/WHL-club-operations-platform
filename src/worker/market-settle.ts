@@ -61,12 +61,15 @@ export interface ListingCore {
 // → pending_review：transfer（idempotency_key = listing:{id}，UNIQUE 幂等）+ 审核任务
 // 成交买方/价格在 batch 执行时用子查询取「当时的活跃最高出价」，与并发出价请求在 D1 单写者下
 // 天然串行，不会漏掉刚落库的更高价。fromStatus 允许从 matched_pending（匹配放行/到期）收口。
+// explicitWindow（v6.88.0）：缺 listing 归属（season/window_seq 为 NULL）时的落窗回退——
+// 关窗阶段机（closing）里 status='open' 的旧回退落不到窗，调用方传关窗目标窗；不传保持旧口径。
 export async function settleListingForReview(
   db: D1Database,
   listing: ListingCore,
   actor: number | null,
   origin: AuditOrigin,
   fromStatus: 'bidding' | 'matched_pending' | 'listed' = 'bidding',
+  explicitWindow?: { season: number; windowSeq: number } | null,
 ): Promise<'settled' | 'already'> {
   const audit = createAuditStatement(db);
   const key = `listing:${listing.id}`;
@@ -88,15 +91,16 @@ export async function settleListingForReview(
                 (SELECT amount FROM bids WHERE listing_id = l.id AND status = 'active' ORDER BY amount DESC, id DESC LIMIT 1),
                 'pending_review',
                 -- v6.75.0：窗口外发起的强拍（l.season 为 NULL）结算时若已有窗开了，直接归当前窗；
-                -- 仍无窗则落 NULL，由开窗批回填到下一窗
-                COALESCE(l.season, (SELECT season FROM season_windows WHERE status = 'open' ORDER BY season DESC, window_seq DESC LIMIT 1)),
-                COALESCE(l.window_seq, (SELECT window_seq FROM season_windows WHERE status = 'open' ORDER BY season DESC, window_seq DESC LIMIT 1)),
+                -- v6.88.0：调用方给了显式窗口（关窗 closing/closed 期）先回退它——status='open'
+                -- 的旧回退在关窗期落不到窗；未传显式窗口时保持旧口径，仍无窗则落 NULL，由开窗批回填
+                COALESCE(l.season, ?, (SELECT season FROM season_windows WHERE status = 'open' ORDER BY season DESC, window_seq DESC LIMIT 1)),
+                COALESCE(l.window_seq, ?, (SELECT window_seq FROM season_windows WHERE status = 'open' ORDER BY season DESC, window_seq DESC LIMIT 1)),
                 ?, ${nowSql()}
          FROM listings l
          WHERE l.id = ? AND l.status = 'pending_review'
            AND EXISTS (SELECT 1 FROM bids WHERE listing_id = l.id AND status = 'active')`,
       )
-      .bind(key, listing.id),
+      .bind(explicitWindow?.season ?? null, explicitWindow?.windowSeq ?? null, key, listing.id),
     db
       .prepare(
         `INSERT INTO review_tasks (type, ref_id, payload, status)
@@ -310,13 +314,14 @@ async function settleByContractType(
   origin: AuditOrigin,
   fromStatus: 'bidding' | 'listed',
   ctx: MarketContext,
+  explicitWindow?: { season: number; windowSeq: number } | null,
 ): Promise<'settled' | 'matching' | 'already'> {
   if (core.type === 'activation') {
     const matchDeadline = new Date(Date.now() + ctx.matchWindowHours * 3600_000).toISOString();
     const changes = await advance(env.DB, core.id, 'activation_match_start', { fromStatus, matchDeadline });
     return changes > 0 ? 'matching' : 'already';
   }
-  return settleListingForReview(env.DB, core, actor, origin, fromStatus);
+  return settleListingForReview(env.DB, core, actor, origin, fromStatus, explicitWindow);
 }
 
 // 全量惰性结算入口：市场相关请求与 cron tick 都走这里。
@@ -339,9 +344,13 @@ export function resetSettleCoalesce(): void {
   settleLastSummary = null;
 }
 
+// season/windowSeq（v6.88.0）：关窗阶段机的显式窗口回退——缺 listing 归属（season/window_seq
+// 为 NULL）的结算落窗用。closeWindow 的 preflight / 窗尾收口会传入关窗目标窗（closing 或刚
+// closed）；普通读 / cron 路径不传 ⇒ 维持旧口径（回退当前 status='open' 窗，关窗期回退不到落
+// NULL 由开窗批回填）。currentWindow 保持只认 open，普通结算不会把 closing 当可写窗。
 export async function settleOverdue(
   env: Env,
-  opts: { origin: AuditOrigin; now?: Date; actor?: number | null; coalesceMs?: number },
+  opts: { origin: AuditOrigin; now?: Date; actor?: number | null; coalesceMs?: number; season?: number; windowSeq?: number },
 ): Promise<SettleSummary> {
   const coalesceMs = opts.coalesceMs ?? 0;
   if (coalesceMs <= 0 || opts.now !== undefined) return runSettleOverdue(env, opts);
@@ -361,13 +370,18 @@ export async function settleOverdue(
 
 async function runSettleOverdue(
   env: Env,
-  opts: { origin: AuditOrigin; now?: Date; actor?: number | null },
+  opts: { origin: AuditOrigin; now?: Date; actor?: number | null; season?: number; windowSeq?: number },
 ): Promise<SettleSummary> {
   const db = env.DB;
   const ctx = await loadMarketContext(db);
   const now = opts.now ?? new Date();
   const actor = opts.actor ?? null;
   const origin = opts.origin;
+  // 显式窗口：两个键都给了才算（缺一个宁可落 NULL 走开窗批回填，不造半归属）
+  const explicitWindow =
+    opts.season !== undefined && opts.windowSeq !== undefined
+      ? { season: opts.season, windowSeq: opts.windowSeq }
+      : null;
   const summary: SettleSummary = { settled: 0, delisted: 0, voided: 0, notesUpdated: 0, healed: 0 };
 
   // 报价惰性过期 + 自愈（v6.3.0）：窗关 / 球员已不在卖方 / 同球员已挂牌的 pending 单收口；
@@ -420,14 +434,14 @@ async function runSettleOverdue(
   // 仅存量/异常残留）→ 与正常截止同口径分流（v6.64.3 起一律进匹配等待）
   const remnantRows = (remnantScan.results ?? []) as (ListingCore & { status: string })[];
   for (const row of remnantRows) {
-    const r = await settleByContractType(env, row, actor, origin, 'listed', ctx);
+    const r = await settleByContractType(env, row, actor, origin, 'listed', ctx, explicitWindow);
     if (r === 'settled') summary.settled++;
   }
 
   // 匹配窗到期（4.4.2.4）：被激活方 24h 内未提交匹配 → 按竞价最高价成交进待审
   const matchRows = (matchScan.results ?? []) as (ListingCore & { activated_by: number | null; player_name: string })[];
   for (const row of matchRows) {
-    if ((await settleListingForReview(db, row, actor, origin, 'matched_pending')) === 'settled') {
+    if ((await settleListingForReview(db, row, actor, origin, 'matched_pending', explicitWindow)) === 'settled') {
       summary.settled++;
       // 证据制配套通知（v6.4.0 改动 4）：匹配窗到期未匹配，两边各知会一声
       await queueClubNotification(env, row.activated_by, 'activation_match_expired', { listingId: row.id, player: row.player_name, playerId: row.player_id });
@@ -471,7 +485,7 @@ async function runSettleOverdue(
       if (row.status === 'listed') {
         if ((await delistUnbid(env, core, ctx, actor, origin)) === 'delisted') summary.delisted++;
       } else {
-        const r = await settleByContractType(env, core, actor, origin, 'bidding', ctx);
+        const r = await settleByContractType(env, core, actor, origin, 'bidding', ctx, explicitWindow);
         if (r === 'settled') summary.settled++;
       }
       continue;
@@ -507,7 +521,7 @@ async function runSettleOverdue(
       if (row.status === 'listed' && row.bid_count === 0) {
         if ((await delistUnbid(env, core, ctx, actor, origin, 'deadline')) === 'delisted') summary.delisted++;
       } else {
-        const r = await settleByContractType(env, core, actor, origin, row.status === 'bidding' ? 'bidding' : 'listed', ctx);
+        const r = await settleByContractType(env, core, actor, origin, row.status === 'bidding' ? 'bidding' : 'listed', ctx, explicitWindow);
         if (r === 'settled') summary.settled++;
       }
       continue;
@@ -543,7 +557,7 @@ async function runSettleOverdue(
     )
     .all<ListingCore>();
   for (const row of broken.results) {
-    if ((await settleListingForReview(db, row, actor, origin)) === 'settled') summary.healed++;
+    if ((await settleListingForReview(db, row, actor, origin, 'bidding', explicitWindow)) === 'settled') summary.healed++;
   }
 
   return summary;

@@ -1846,12 +1846,22 @@ describe('冠名市场与招商轮路由（TC-ROUTE）', () => {
         windows: 2,
       }),
     ).toBe('✅ 品牌接替生效：「奥维恩」冠名 阿森纳 正式生效（进取套餐，2.78M/窗 × 2 窗）。\n—— 奥维恩');
-    orderInSource(
-      readFileSync(MACHINE_SRC, 'utf8'),
-      "if ((results[0]?.meta.changes ?? 0) === 0) throw new HttpError(409, '窗口刚被关过了');",
-      'for (const n of home.notifications) {',
-      'await queueClubNotification(env, n.clubId, n.template, n.data);',
+    const machineSrc = readFileSync(MACHINE_SRC, 'utf8');
+    expect(machineSrc).not.toContain("if ((results[0]?.meta.changes ?? 0) === 0)");
+    expect(machineSrc).toContain(
+      "SET status = 'closed', closed_at = ${nowSql()} WHERE season = ? AND window_seq = ? AND status = 'closing'",
     );
+    const closeAllStart = machineSrc.indexOf('const summary: CloseWindowResult = {');
+    const closeAllBatch = machineSrc.indexOf('await db.batch([', closeAllStart);
+    const completeAt = machineSrc.indexOf(
+      '...completeCloseRun(db, run.id, CLOSE_STEP_CLOSE_ALL, summary),',
+      closeAllBatch,
+    );
+    const notifyAt = machineSrc.indexOf('for (const n of home.notifications) {', completeAt);
+    expect(closeAllStart).toBeGreaterThan(-1);
+    expect(closeAllBatch).toBeGreaterThan(closeAllStart);
+    expect(completeAt).toBeGreaterThan(closeAllBatch);
+    expect(notifyAt).toBeGreaterThan(completeAt);
     expect(readFileSync(HOME_SRC, 'utf8')).toContain("template: 'naming_offer_activated',");
   });
 });

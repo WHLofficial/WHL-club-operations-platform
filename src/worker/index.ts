@@ -28,6 +28,8 @@ import authRoutes from './routes/auth.ts';
 import mediaRoutes from './routes/media.ts';
 import internalRoutes from './routes/internal.ts';
 import { settleOverdue, type SettleSummary } from './market-settle.ts';
+// 关窗冻结闸（v6.88.0 B1）：closing 期间普通非 GET/HEAD 写一律 409 window_closing
+import { windowClosingGuard } from './window-guard.ts';
 import { dispatchPendingNotifications } from './notify.ts';
 import { autoConfirmResults, retryUnresolvedResults, type XpRetrySummary } from './results.ts';
 import { expirePendingEvents, type EventTickResult } from './event-ops.ts';
@@ -56,6 +58,15 @@ app.use(
     tracesSampleRate: 0,
   })),
 );
+
+// 关窗冻结闸（v6.88.0 B1）：窗口进入 closing 后、落 closed 前，普通业务写必须挡住——否则
+// close_all 在结算「窗口内」事实时，并发写仍在制造新事实（工资/主场/忠诚/体检口径漂移）。
+// 挂在路由之前；非 GET/HEAD 且路径不在豁免子树时查 season_windows 有没有 closing 行（部分
+// 索引点查，常数级），是则 409 { error, code: 'window_closing' }。GET/HEAD 与豁免路径不触达 D1。
+// 豁免：/api/admin（管理员处理审核队列/谈判——否则 pending_review 没法消化，窗口卡死 closing）、
+// /api/internal（机器回调）、/api/auth（登录）、/api/media（媒体上传）。
+// 已知过渡面（随 docs 登记）：读触发的 settleOverdue 写不在 B1 冻结面（读端点照旧可触发惰性结算）。
+app.use('/api/*', windowClosingGuard());
 
 // 公开读缓存的中心化失效挂钩（v3.2.0）：**必须注册在路由之前**——Hono 的 compose 里路由
 // 返回响应就结束链路，注册在后面的中间件根本不会执行。

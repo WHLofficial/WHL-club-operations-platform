@@ -180,6 +180,7 @@ const MIGRATION_FILES = [
   '0093_transfer_player_snapshot.sql',
   '0094_player_playstyle_origin.sql',
   '0095_player_model_value.sql',
+  '0096_window_close_runs.sql',
 ];
 
 export function applyMigrations(sqlite: DatabaseSync, upTo?: string): void {
