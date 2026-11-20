@@ -134,6 +134,21 @@
 
 ---
 
+## v6.88.0 · 关窗持久化阶段机 B1：closing / claim / 租约 / 冻结（2026-11-21，本地未 push）
+
+**缘起**：D1 `batch()` 的 `meta.changes=0` 是成功结果、不会中止后续语句——现有 `closeWindow` 批后 409「窗口刚被关过了」只是**事后报错**，并发后到者仍会提交工资/主场/忠诚/体检；`naming-ops.ts:1130-1140` 无本窗结算守卫，会多减合同期。用户裁决走 **B 持久化阶段机**，并定：closing 期间冻结全部俱乐部写操作、失败只前进重试、B1 先落 7 段中的单 step 骨架（B2 拆段）。
+
+**交付**：
+- 迁移 `0096_window_close_runs.sql`：`window_close_runs`（`UNIQUE(season, window_seq)`、lease、`summary_json`、status CHECK）+ `window_close_steps`（`PRIMARY KEY(run_id, step)`、attempt、status CHECK）。
+- `src/worker/window-close-runs.ts`：`claimCloseStatements`（open→closing + INSERT run/step 小批，唯一认领闸；导出给测试直跑生产同文 SQL）、`claimCloseRun`（open 时全部业务校验前置，closing 按 run resume/completed 回放）、`acquireCloseLease`（TTL 5 分钟 CAS）、`completeCloseRun`。
+- `src/worker/window-guard.ts` + `index.ts`：`/api/*` 路由前中间件，closing 时非 GET 一律 409 `window_closing`；豁免 `/api/admin`、`/api/internal`、`/api/auth`、`/api/media`、`/api/cron`，GET 放行。
+- `src/worker/window-machine.ts`：preflight（open 状态下、业务校验前）→ claim → 租约 → 二次结算/强约/builders → 单批 close_all（`closing→closed` + 审计 + 业务语句 + step done + run completed）→ 批后 best-effort（失败只记 warnings）。批内不再用 changes=0 挡并发。`openWindow`/`checkSeasonSettle` 计数改 `IN ('open','closing')`；`settleOverdue`/`settleListingForReview` 加显式窗口回退。
+- `tests/window-close-runs.test.ts` T01–T17（25 例）；`docs/test-plans/v6.88.0-window-close-pipeline.md`。
+
+**验收**：typecheck 三份全清；vitest **218 文件 / 3385 例全过**（139.5s；+25 例）；build 成功（`index-OOZhcDWI.js` 755.59 kB / gzip 236.93 kB）；MV-01…MV-08 全命中并还原（MV-01 由 T16 覆盖、MV-06 靠补 guardSql 后置观测，详见测试计划 §9）。
+
+**B1 边界（后续批次）**：仍是单 step `close_all`，payroll/home/loyalty/squad_audit 未拆独立可重放阶段（B2）；通知未走 outbox，`post_close` 失败只记 warnings、允许 at-least-once（B3）；并发/崩溃矩阵与租约交错（B4）；closing 冻结是整段兜底，不是逐阶段租约。迁移 `0096` 必须先 apply 再 push（CF Workers Builds 无迁移步骤）。
+
 ## v6.87.1 · 测试补锁批：挂牌缺口与契约源码锁（2026-11-20，已上线 Version d687506b）
 
 - **范围**：v6.83 测试计划 §9.2 未落地 7 例中的 6 例 + M5–M11；v6.82 契约锁 TC-LOCK-01…08 + MV-01…10。纯测试增量，零 `src/`/`web/` 运行时改动。

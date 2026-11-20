@@ -4,6 +4,32 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.88.0] · 关窗持久化阶段机 B1：closing 状态、claim/租约与冻结（2026-11-21，本地未 push）
+
+**Added**
+
+- `src/db/migrations/0096_window_close_runs.sql`：`window_close_runs`（`UNIQUE(season, window_seq)`、`status`/`current_step`/lease/`summary_json`）与 `window_close_steps`（`PRIMARY KEY(run_id, step)`、`attempt`/`summary_json`）；两表 `status` 均带 CHECK 紧枚举。
+- `src/worker/window-close-runs.ts`：`claimCloseStatements`（open→closing + INSERT run + INSERT step 的小批，唯一认领闸）、`claimCloseRun`（open 先做全部业务校验，closing 按 run 状态 resume/completed 回放）、`acquireCloseLease`（TTL 5 分钟，CAS 只接管空闲/过期租约）、`completeCloseRun`。
+- `src/worker/window-guard.ts`：`windowClosingGuard` 挂在 `index.ts` 的 `/api/*` 路由之前；`season_windows.status='closing'` 时非 GET 请求一律 409 `{ error: '窗口正在关闭，暂时不能修改', code: 'window_closing' }`；`/api/admin`、`/api/internal`、`/api/auth`、`/api/media`、`/api/cron` 豁免，GET 放行。
+- `tests/window-close-runs.test.ts`：T01–T17 共 25 例（claim 互斥/幂等、校验前置于 claim、close_all 全链/回滚、resume、租约、冻结五豁免、openWindow/checkSeasonSettle 计数、settleOverdue 显式窗口、迁移真跑、批后降级）。
+- `docs/test-plans/v6.88.0-window-close-pipeline.md`：范围、T01–T17、MV-01…08、R1–R4 与执行记录。
+
+**Changed**
+
+- `src/worker/window-machine.ts`：`closeWindow` 改为持久化流程——preflight 惰性结算（open 状态下、全部业务校验之前）→ claim（写闸）→ 租约 → 二次结算/强约/builders → 单批 close_all（`closing→closed` + 审计 + 业务语句 + step done + run completed）→ 批后 best-effort（二次结算、海捞开标、现有通知；失败只记 warnings）。批内不再用 `UPDATE changes=0` 当并发闸；`currentWindow` 仍只认 open，关窗单独 `loadCloseWindow`。
+- `openWindow` 与 `checkSeasonSettle` 的窗口计数改 `status IN ('open','closing')`；`settleOverdue`/`settleListingForReview` 增显式窗口回退，closing 下缺归属的 listing 不会落错窗。
+- `package.json` 6.87.1 → 6.88.0。
+
+**Verification**
+
+- typecheck 三份全清；vitest **218 文件 / 3385 例全过**（139.5s；v6.87.1 基线 217/3360，本批 +25 例）；build 成功（`index-OOZhcDWI.js` 755.59 kB / gzip 236.93 kB）。
+- 变异 MV-01…MV-08 全部命中并逐字还原（详见测试计划 §9）。
+
+**Notes / 过渡语义（B1 边界）**
+
+- B1 仍是**单 step `close_all`**：payroll/home/loyalty/squad_audit 尚未拆成独立可重放阶段（B2）；通知未走 outbox（B3，`post_close` 失败只记 warnings，允许 at-least-once）；并发/崩溃矩阵在 B4。closing 冻结是整段兜底，不是逐阶段租约。
+- `finalize` 成功后 `post_close` 失败 = 关窗成功 + warnings；run 已完成，不因后置动作失败回滚业务事实。
+
 ## [v6.87.1] · 测试补锁批：挂牌缺口 6 例 + 契约源码锁 14 例（2026-11-20，已上线 Version d687506b）
 
 **Added**
