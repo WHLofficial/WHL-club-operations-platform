@@ -65,6 +65,7 @@ npm run dev:web            # 只改前端时用（Vite，/api 代理到 8791）
 - **listings 状态转移一律走 `src/worker/listing-ops.ts` 的 `advance`/`advanceStatement`，不许直写 `UPDATE listings SET status`。**
 - **players.status 一律走 `src/worker/player-ops.ts` 的 `advance`/`advanceStatement`（还原走 `restoreAfterListing`/`restoreAfterNegotiation`），禁止裸写 `UPDATE players SET status`。**（v6.87.0 起，18 收编 cause 全部经此入口）
 - **关窗（`season_windows` open→closing→closed）只许走 `src/worker/window-close-runs.ts` 的 claim/租约/close_all 流程，禁止绕过写 `UPDATE season_windows SET status`；`closing` 期间俱乐部侧非 GET 写由 `src/worker/window-guard.ts` 统一 409 `window_closing`，不得在各路由另造冻结判据。**（v6.88.0 B1 起）
+- **关窗三类通知（promotion_forced / home 段四模板 naming_* / squad_audit_failed）只经 `window_close_notifications` outbox 流转（迁移 0097，原语在 `src/worker/window-close-outbox.ts`）：阶段内与所在段 step done 同批落库、post_close 统一投递，禁止在段内直发。**（v6.88.1 B3 起）
 
 ## 文档纪律
 

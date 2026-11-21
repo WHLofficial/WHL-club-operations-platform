@@ -4,6 +4,39 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.88.1] · 关窗通知 outbox 化：三段落库 + post_close 统一投递 + 管理端状态与重投（2026-11-21）
+
+**Added**
+
+- `src/db/migrations/0097_window_close_notifications.sql`：关窗通知 outbox 表 `window_close_notifications`——`PRIMARY KEY(run_id, dedup_key)` 复合主键兼作 UNIQUE（`INSERT OR IGNORE` 吃段级重放 / 重复 close，不重复落行）、`status` 紧枚举 CHECK（pending / sent / failed）、`attempt` / `last_error` / `created_at` / `sent_at`、`idx_window_close_notifications_run_status` 服务投递查询与状态端点分组。`dedup_key` 三族 = `promotion:{sessionId}` / `home:{clubId}:{template}:{序号}` / `squad:{clubId}`（run 本身 `UNIQUE(season, window_seq)`，键不重复带窗位）；`tests/d1.ts` 的 `MIGRATION_FILES` 追加。
+- `src/worker/window-close-outbox.ts`（新）：outbox 三件原语——`stageCloseNotificationStatements`（段内落库语句构造，与所在段收口批同批原子：段批回滚行不落、段提交行必在）、`deliverCloseNotifications` / `retryCloseNotifications`（pending/failed 逐行投递，ok 才 sent，failed 记 `last_error` + attempt+1，坏 payload 照 `dispatchPendingNotifications` 先例直接标 failed 防每轮空转，单行独立 try/catch 不中断其余行）。
+- `src/worker/notify.ts`：抽 `queueClubNotificationEx` 严格返回 `{ok, count, error?}`；无收件人 `ok:true count:0` 是完成态不是失败。旧 `queueClubNotification` 改薄壳，旧行为「吞错、失败返 0」逐字保留（既有调用方零变化）。
+- `src/worker/routes/admin/market.ts`：`GET /api/admin/windows/close/status`（权限键 `club.registrations.manage`；window/run 逐字段 + summary 解析出的 `warnings` + 7 step 逐行 + 通知 pending/sent/failed 三计数）与 `POST /api/admin/windows/close/notifications/retry`（重投最近 run 的 pending/failed 行；只认最新 run 且非 completed 409「最近一次关窗尚未完成，先重试关窗」；每次写审计 `window_close_notify_retry`）。契约两型 `WindowCloseStatus` / `WindowCloseNotifyRetryResult` 落 `src/contract/batch4.ts`，`web/src/lib/api.ts` 只 re-export。
+- `web/src/pages/admin/MarketPage.tsx`：`CloseStatusPanel` 管理端面板——7 段进度表、`warnings`、通知三计数、「重试关窗」（仅 `run.status === 'failed'` 时出现）与「重试通知」（run completed 且有 pending/failed）两按钮；`WINDOW_STATUS_LABEL` 补 `closing` 键。
+- `tests/window-close-outbox.test.ts`（新）：21 例覆盖 TC-B3-01…12（表结构锁、三段落库与原子性反证、at-least-once 重投、重复 close / resume、严格失败语义、无绑定、状态 / 重投端点、旧壳兼容、dedup 单元面）。
+- `docs/test-plans/v6.88.1-window-close-b3.md`：范围、TC-B3-01…13、MB3-01…09、既有断言改造与执行记录。
+
+**Changed**
+
+- `src/worker/window-machine.ts`：三类关窗通知（promotion_forced / home 段四模板 naming_* / squad_audit_failed）从 post_close 直发改为「阶段内 outbox 落库 + post_close 统一投递」——`promotion:{sessionId}` 并 preflight 收口批、`home:*` 并 home 段批、`squad:*` 并 squad_audit 段批；post_close 两个直发块删除改 `deliverCloseNotifications` 接线。崩在「段 done 与 post_close 之间」或 resume 跳过已 done 段不再丢通知（行已随段批落库，投递按 run_id 捞）。`notifications.payload` 只落 `{text,...}` 渲染文本、查不到 season/windowSeq，squad_audit_failed 的 LIKE 查重恒不命中的现状就此修复（payload 落生成点 data 原文，渲染推迟到投递时）。
+- `src/worker/negotiations.ts`：`forceSettleAtExpected` boolean → 三态 `ForceSettleOutcome`（`settled-now` / `already-forced` / `skipped`）——「强约成功 + 收口批失败 + resume」场景下 preflight 反查「本 run 窗位内已强约成约」的会话照常攒通知（评审修复 finding 1+2）；到期引擎两调用点适配（`already-forced` 不再直发，防并发对手双份）。
+- 既有断言同步改造：T05b（`tests/window-close-runs.test.ts`）通知断言改 outbox pending 口径、挪到 resume 成功后；TC-ROUTE-07（`tests/market-rounds.test.ts`）源码锁从「home.notifications 直发块」改锁 `deliverCloseNotifications` 接线点。`tests/window-close-parity.test.ts` 快照扩 outbox 表、三局金样重捕获、`expectB2Structure` 扩 outbox 行集断言、B1 死数据清除。
+- `package.json` 6.88.0 → 6.88.1。
+
+**投递语义（四条，如实口径）**
+
+- **at-least-once，非 exactly-once**。重复面两类如实登记：崩溃面（崩在「notifications 双通道行已写、outbox 行未标 sent」之间 ⇒ 重投重复一条）与并发面（post_close 投递与管理端 retry 可对同一批行各投一次——收口 UPDATE 的 `status IN ('pending','failed')` 前置抢占只保证状态 / attempt / 计数不互踩，投递动作本身拦不住）；TC-B3-05 按「多 1 行而非 0 行」诚实锁重复语义，不谎称去重。
+- **通知失败不阻断关窗**：投递失败只把 post_close step 标 failed + `warnings` 追加进 run 摘要，`run.status` 保持 completed，可在管理端重试。
+- **无绑定 count=0 = 终态 sent**：没有收件人是完成态不是可重试故障；补绑不补发（sent 行不进重投查询）。
+- **B4 恢复范围**：cron 自动兜底投递不做（管理端 retry 人工兜底）；resume 重建后段 parity（B2 登记遗留）与并发 / 崩溃 × 租约交错矩阵留 B4。
+
+**Verification**
+
+- typecheck 三份全清；vitest **220 文件 / 3413 例全过**（118.75s；v6.88.0 B2 基线 219/3392，本批净 +1 文件 / +21 例 = outbox 新文件）；build 成功（入口 `index-CkrSjAwF.js` 755.59 kB / gzip 236.92 kB）。
+- B3 子集 5 文件 164 例全绿（outbox 21 / window-close-runs 29 / parity 3 / market-rounds 78 / weather-forecast 33）。
+- 变异 MB3-09（强约三态退化回归）评审修复轮执行命中并逐字还原；MB3-01…08 执行产物未在工作区留存，本收口不复述其结果。
+- 部署前置：迁移 `0097` 先 apply 再 push（CF Workers Builds 无迁移步骤；新代码在无表生产上任何关窗段批 INSERT 即炸、关窗全断）。
+
 ## [v6.88.0] · 关窗持久化阶段机 B1+B2：closing/claim/租约/冻结 + 七段拆分与 parity（2026-11-21，已上线 Version dc2c29a2）
 
 **Added**

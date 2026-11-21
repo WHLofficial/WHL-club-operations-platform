@@ -134,6 +134,34 @@
 
 ---
 
+## v6.88.1 · 关窗通知 outbox 化：三段落库 + post_close 统一投递 + 管理端状态与重投（2026-11-21）
+
+**缘起**：v6.88.0 B2 的 post_close 段把三类关窗通知（promotion_forced / home 段四模板 naming_* / squad_audit_failed）在 finalize 之后**直发**——崩在「段 done 与 post_close 之间」或 resume 跳过已 done 段时通知永久丢失（B2 自认注释原文「resume 跳过段的产出……数据不可得（B4 恢复范围）」）；且 `notifications.payload` 只落 `{text,...}` 渲染文本、查不到 season/windowSeq，squad_audit_failed 的 LIKE 查重恒不命中。B3 按施工表把三类通知改 **outbox 化**；测试计划 `docs/test-plans/v6.88.1-window-close-b3.md`（qa-test-planner，评审版 2/3），本地提交三枚 `a595c62`（主施工）→ `8e40a26` → `1f11b7e`（评审修复）。
+
+**交付（六件）**：
+- 迁移 `0097_window_close_notifications.sql`：`window_close_notifications`（`PRIMARY KEY(run_id, dedup_key)` 复合主键兼作 UNIQUE、`status` 紧枚举 CHECK、`attempt`/`last_error`/`created_at`/`sent_at`、`(run_id, status)` 索引；FK 裸引用照 0096 惯例；created_at/sent_at 不落 DDL DEFAULT、由语句构造器注入 NOW_SQL 同款 UTC ISO）。`dedup_key` 三族 = `promotion:{sessionId}` / `home:{clubId}:{template}:{序号}` / `squad:{clubId}`；`tests/d1.ts` 的 `MIGRATION_FILES` 追加。
+- `src/worker/window-close-outbox.ts`（新）：`stageCloseNotificationStatements`（段内落库语句构造，`INSERT OR IGNORE` 与所在段收口批同批原子）+ `deliverCloseNotifications` / `retryCloseNotifications`（pending/failed 逐行投递，ok 才 sent，failed 记 `last_error` + attempt+1，坏 payload 直接标 failed 防每轮空转，单行独立 try/catch）。
+- `src/worker/notify.ts`：抽 `queueClubNotificationEx` 严格返回 `{ok, count, error?}`（无收件人 `ok:true count:0` = 完成态）；旧 `queueClubNotification` 改薄壳、「吞错、失败返 0」旧行为逐字保留。
+- `src/worker/window-machine.ts`：三段 staging——`promotion:{sessionId}` 并 preflight 收口批、`home:*` 并 home 段批、`squad:*` 并 squad_audit 段批；post_close 两个直发块删除改 `deliverCloseNotifications` 接线（失败只标 step failed + warnings，run 保持 completed）。
+- `src/worker/routes/admin/market.ts` + `src/contract/batch4.ts`：`GET /api/admin/windows/close/status` 与 `POST /api/admin/windows/close/notifications/retry`（权限键均 `club.registrations.manage`；retry 只认最新 run 且非 completed 409、写审计 `window_close_notify_retry`）；契约两型 `WindowCloseStatus` / `WindowCloseNotifyRetryResult` 落 batch4.ts，`web/src/lib/api.ts` 只 re-export。
+- `web/src/pages/admin/MarketPage.tsx`：`CloseStatusPanel`（7 段进度表 / warnings / 通知三计数 / 重试关窗 / 重试通知；`WINDOW_STATUS_LABEL` 补 `closing` 键）。
+
+**评审修复（`1f11b7e`，计划同步修订版 3）**：
+- finding 1+2（假绿面）：`forceSettleAtExpected` boolean → 三态 `ForceSettleOutcome`（settled-now / already-forced / skipped）；preflight `promoSessions` 反查「本 run 窗位内已强约成约」的会话（窗位圈定 + `settled_at >= run.started_at` + `settle_source='forced'`）——修复前 resume 只查 active，「强约成功 + 收口批失败 + resume」的会话凭空消失、通知永久丢；TC-B3-02 追加断言 5 钉死（修复前必红）；到期引擎两调用点适配（`already-forced` 不再直发防双份）。
+- finding 3（at-least-once 并发面）：`markNotificationSent` / `markNotificationFailed` 加 `status IN ('pending','failed')` 前置抢占——收口只由抢到行的一方写（changes=0 计 skipped）；skipped 从「恒 0 防御值」改「被并发投递者抢先收口的行」，契约注释与 outbox 头注同步如实登记「投递动作本身拦不住，重复条数 = 并发投递者数 − 1」。
+- finding 5：UI「重试关窗」出现条件收紧为 `run.status === 'failed'`（running 可能是另一管理员正在推进、点击必撞 409；进程硬崩留下的 running run 走父级「关闭当前窗口」resume，入口不丢）。
+- finding 6：retry 端点较 ask 字面收紧（只认最新 run、非 completed 409、不回落更早 completed run）在端点注释注明理由。
+- 变异矩阵补 MB3-09（三态退化回归）并执行命中、逐字还原。
+
+**投递语义（四条，如实口径）**：① at-least-once 非 exactly-once，重复面两类（崩溃面 / 并发面）如实登记，TC-B3-05 按「多 1 行而非 0 行」诚实锁；② 通知失败不阻断关窗（run 保持 completed，post_close step failed + warnings，管理端可重试）；③ 无绑定 count=0 = 终态 sent，补绑不补发；④ B4 恢复范围 = cron 自动兜底投递不做（管理端 retry 人工兜底）+ resume 重建后段 parity（B2 遗留）+ 并发/崩溃 × 租约交错矩阵。
+
+**验收（2026-11-21 于 HEAD = `1f11b7e` 实测）**：
+- typecheck 三份全清；vitest **220 文件 / 3413 例全过**（118.75s；v6.88.0 B2 基线 219/3392，本批净 +1 文件 / +21 例 = 新建 `tests/window-close-outbox.test.ts` 21 例，TC-B3-01…12）；build 成功（入口 `index-CkrSjAwF.js` 755.59 kB / gzip 236.92 kB）。
+- B3 子集 5 文件 164 例全绿：outbox 21 / window-close-runs 29（含 T05b 改造）/ parity 3（TC-B3-13 金样重捕获 + `expectB2Structure` 扩 outbox 行集 + B1 死数据清除）/ market-rounds 78（含 TC-ROUTE-07 源码锁改锁 `deliverCloseNotifications` 接线点）/ weather-forecast 33（迁移清单锁）。
+- 变异：MB3-09 命中并还原；**MB3-01…08 执行产物未在工作区留存**（scratch/、.tmp/ 无变异轮日志），本收口不复述其结果——详见测试计划 §7.3。
+
+**未覆盖与部署前置**：e2e 未在本批执行；UI 真浏览器人工复核无留存记录；firstError 诊断缺口未采纳（status/retry 响应不带投递失败原因，管理员查 failed 原因须直连 D1）；生产 apply 与上线回读未做。**部署铁律：迁移 `0097` 先 apply 再 push**（CF Workers Builds 无迁移步骤；新代码在无表生产上任何关窗段批 INSERT 即炸、关窗全断）。
+
 ## v6.88.0 · 关窗持久化阶段机 B1+B2：closing/claim/租约/冻结 + 七段拆分与 parity（2026-11-21，已上线 Version dc2c29a2）
 
 **缘起**：D1 `batch()` 的 `meta.changes=0` 是成功结果、不会中止后续语句——现有 `closeWindow` 批后 409「窗口刚被关过了」只是**事后报错**，并发后到者仍会提交工资/主场/忠诚/体检；`naming-ops.ts:1130-1140` 无本窗结算守卫，会多减合同期。用户裁决走 **B 持久化阶段机**，并定：closing 期间冻结全部俱乐部写操作、失败只前进重试、B1 先落 7 段中的单 step 骨架（B2 拆段）。
