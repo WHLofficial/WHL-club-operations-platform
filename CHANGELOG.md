@@ -38,6 +38,12 @@
 - 4 文件套件 72/72；`npm run typecheck` 三份清；`npm test` 净 +19 例（修复轮后全量绿）；变异矩阵 M1…M6 全命中并逐字还原；修复轮 5 文件套件（4 关窗文件 + market-rounds）150/150。
 - `docs/test-plans/v6.88.2-window-close-b4.md` §7 回填执行记录。`package.json` 6.88.1 → 6.88.2。
 
+**独立评审与终验（2026-11-21 续跑，HEAD `f33fd6f`，v6.88.3 并行提交叠入之上）**
+
+- 独立只读整体评审（对象 = `d06da8a` 实现/测试 + 测试计划）：**5 条 findings 全部 low、无 medium/high** ⇒ 修复阶段跳过、零代码改动。处置：1 条 docs 登记订正（ROADMAP v6.88.0 B2 边界行——B2-06 标已由 TC-B4-06 补位（首窗夹具降级）、B2-12 保持开放），其余 4 条登记不改 / 后续批次 / 产品裁决，逐条见测试计划 §7.6。
+- 终验（订正轮亲跑）：`npm run typecheck` 三份 EXIT=0；`npm test` **222 文件 / 3435 例全绿**（TC-ROUTE-07 已绿，施工轮 deferred 结清；对施工轮口径 221 文件 / 3431 passed + 1 failed：+1 文件 / +3 例为 v6.88.3 `tests/build-target.test.ts` 叠入，passed +4 = 新例 3 + 复绿 1）；`npm run build` 成功（入口 `index-CqlCVxuX.js` 762.69 kB / gzip 239.75 kB）。
+- 测试计划同步：§7.2 全量记录订正为 222/3435 并补 TC-ROUTE-07 / build 两行实测、§7.5 两项 deferred 销项、新增 §7.6 评审与 findings 处置。
+
 ## [v6.88.1] · 关窗通知 outbox 化：三段落库 + post_close 统一投递 + 管理端状态与重投（2026-11-21）
 
 **Added**

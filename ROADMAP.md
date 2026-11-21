@@ -196,7 +196,9 @@
 
 **修复轮（2026-11-21，脚本指令「目标测失败，修复」）**：首版 F6 的第 5 参 `owner` 打破 `tests/market-rounds.test.ts` TC-ROUTE-07 源码锁（锚点逐字 `...completeCloseRun(db, run.id, CLOSE_STEP_FINALIZE, summary),`，:1857-1859）⇒ 全量恒 1 红；修复指令允许清单仍不含该测试文件 ⇒ 改在实现侧兼容：`completeCloseRun` 回 4 参签名、run 语句守卫换 `AND status <> 'completed'`（F6 why 字面目标由此完整达成；「不清接管者租约」面由每段批尾续租承担——续租后租约在 TTL 内，对手在 finalize 批提交窗口内无法 acquire——加批前围栏，纵深防御取舍登记在 `completeCloseRun` JSDoc 与计划 §7.4-8）。修复后：`node node_modules/vitest/vitest.mjs run tests/market-rounds.test.ts -t "TC-ROUTE-07"` → 1 passed；5 文件套件（4 关窗文件 + market-rounds）→ **5 files / 150 passed**；`npm run typecheck` EXIT=0。
 
-**待办（deferred）**：`npm run build` 未跑（B4 无前端改动）；未 commit、未 push、未部署。
+**待办（deferred）**：~~`npm run build` 未跑~~ 与 ~~全量 `npm test` 1 红（TC-ROUTE-07）~~ 均已于续跑轮销项（见下方独立评审与终验段）；未 push、未部署（实现与文档已随 `d06da8a` 提交）。
+
+**独立评审与终验（2026-11-21 续跑，HEAD `f33fd6f`，v6.88.3 并行提交 `6067686`/`f33fd6f` 叠入之上）**：续跑工作流对已提交实现做独立只读整体评审——**5 条 findings 全部 low、无 medium/high ⇒ 修复阶段跳过、零代码改动**。① `completeCloseRun` run 语句无 owner CAS（「围栏读→批提交」亚秒窗 + 租约先过期双重病态才可达、终态自洽，`completeCloseRun` JSDoc 与测试计划 §7.4-8 已登记；留未来批次收进 market-rounds 允许清单后加 CAS 并同步 TC-ROUTE-07 锚）；② 洞校验注释把洞态成因写成「进程死亡」（D1 batch 原子性下造不出非前缀 done，真实成因是手工拨步/跨版本残留；逻辑正确且被 TC-B4-07/13/18 三例锁死，注释订正留后续批次）；③ TC-B4-06 补位 B2-06 用 S1W1 首窗夹具——loyalty 批业务语句为 0，「loyalty 流水在场回滚」资金面未被见证（后续批次克隆到 seedMid 夹具）；④ ROADMAP B2 边界行「B2-06/B2-12 未落」半失效——本轮已订正（B2-06 标已补位 + 夹具降级注记，B2-12 保持开放）；⑤ TC-B4-05 的 resume 忠诚金额路径分歧（A 1.00 / B 2.00）是真实资金面行为，登记留产品裁决。评审员自跑核验：4 文件套件 72 passed、TC-ROUTE-07 单例 1 passed、typecheck 三份 EXIT=0（逐条发现与处置见测试计划 §7.6）。**终验（订正轮亲跑）**：`npm run typecheck` 三份 EXIT=0；`npm test` **222 文件 / 3435 例全绿**（TC-ROUTE-07 已绿；+1 文件 / +3 例为 v6.88.3 `tests/build-target.test.ts` 叠入）；`npm run build` 成功（入口 `index-CqlCVxuX.js` 762.69 kB / gzip 239.75 kB）。
 
 ## v6.88.0 · 关窗持久化阶段机 B1+B2：closing/claim/租约/冻结 + 七段拆分与 parity（2026-11-21，已上线 Version dc2c29a2）
 
@@ -217,7 +219,7 @@
 
 **验收**：typecheck 三份全清；vitest **218 文件 / 3385 例全过**（139.5s；+25 例）；build 成功（`index-OOZhcDWI.js` 755.59 kB / gzip 236.93 kB）；MV-01…MV-08 全命中并还原（MV-01 由 T16 覆盖、MV-06 靠补 guardSql 后置观测，详见测试计划 §9）。
 
-**B2 边界（后续批次）**：通知未走 outbox（B3）；resume 重建后段 parity、并发/崩溃矩阵与租约交错在 B4；B2-06 loyalty 失败与 B2-12 richFixture 未落，测试矩阵缺口已在测试计划 §10.10 登记。迁移 `0096` 必须先 apply 再 push（CF Workers Builds 无迁移步骤）。
+**B2 边界（后续批次）**：通知未走 outbox（B3）；resume 重建后段 parity、并发/崩溃矩阵与租约交错在 B4。~~B2-06 loyalty 失败与 B2-12 richFixture 未落~~（2026-11-21 v6.88.2 续跑评审 finding 4 订正）：**B2-06 已由 v6.88.2 的 TC-B4-06 补位**——S1W1 首窗夹具只锁失败形状（500 / loyalty failed / 前三段不连坐 / 失败收口 / 窗留 closing），loyalty 批业务语句为 0，「loyalty 流水在场且随段整回滚」的资金面留后续批次克隆 seedMid 夹具补齐；**B2-12 richFixture 未落、保持开放**（v6.88.0 计划 §10.10 登记未动）。迁移 `0096` 必须先 apply 再 push（CF Workers Builds 无迁移步骤）。
 
 **上线记录（2026-11-21）**：`0096_window_close_runs.sql` 先 apply 到生产（`window_close_runs`/`window_close_steps` 已建）；push `b337760..ed61dc5`；CF 自动部署 Version `dc2c29a2-47ae-44d0-b6c3-949d8ef6f227`（2026-11-21T03:34:40Z）；5 端点回读全 200、线上入口 `assets/index-OOZhcDWI.js` 与本地一致。
 
