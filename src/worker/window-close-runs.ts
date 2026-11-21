@@ -320,11 +320,53 @@ export async function acquireCloseLease(db: D1Database, runId: number, owner: st
 }
 
 /**
+ * 关窗租约已易主（B4 段提交点围栏的错误形状）：失配抛 409 让位。外层 catch 对本错误
+ * 跳过 markCloseStepFailed 直接上抛——让位是零写入退出：不标当前段 failed、不清新持有者
+ * 的租约、不把 run 翻 failed（接管者正在跑，失败收口是它的职责）。
+ */
+export class CloseLeaseLostError extends HttpError {
+  constructor() {
+    super(409, '关窗租约已易主，本次请求让位');
+  }
+}
+
+/**
+ * 段提交点围栏（B4）：确认 run 的租约仍在本手。失配 / run 行缺失（含对手已完成清租——
+ * completed 后 lease_owner 为 NULL）一律抛 CloseLeaseLostError。判据只看 lease_owner：
+ * 过期但未被人接管时本手仍可推进（接管是 acquireCloseLease 的职责，段围栏不重复判时间）。
+ */
+export function assertCloseLeaseHeld(run: CloseRunRow | null, owner: string): void {
+  if (run === null || run.leaseOwner !== owner) throw new CloseLeaseLostError();
+}
+
+/**
+ * 段级租约续期语句（B4，追加进段提交批的尾、与该段业务语句同批原子）：owner 匹配才续期（CAS），
+ * 不匹配零改行——接管者换掉 lease_owner 后，旧持有者批尾的续租自然落空（changes=0 不中止批，
+ * 见文件头关键陷阱），绝不会覆盖对方的到期时刻。只改 lease_expires_at，不碰 status /
+ * current_step / updated_at / lease_owner。
+ */
+export function renewCloseLease(db: D1Database, runId: number, owner: string, ttlMs: number): D1PreparedStatement {
+  return db
+    .prepare(`UPDATE window_close_runs SET lease_expires_at = ? WHERE id = ? AND lease_owner = ?`)
+    .bind(new Date(Date.now() + ttlMs).toISOString(), runId, owner);
+}
+
+/**
  * 任一段批失败后的收口（单独 batch，窗口保持 closing）：step 标 failed（attempt+1）+
  * run 标 failed 并清租约（清掉才能让下一次重试立即 acquire，不必干等 TTL 过期）。
  * 幂等：step 已 done 不改；run 已 completed 不改。
+ *
+ * B4（F2）：run 语句带 AND lease_owner = ?——owner 必须传本手持有者；租约已易主（接管者
+ * acquire 换了 lease_owner）时本语句零改行：旧持有者的失败收口不清新持有者租约、不把 run
+ * 翻 failed（run 的失败收口归接管者）。正常路径 owner 与库内一致，行为与 B2 逐字相同。
  */
-export async function markCloseStepFailed(db: D1Database, runId: number, step: string, error: unknown): Promise<void> {
+export async function markCloseStepFailed(
+  db: D1Database,
+  runId: number,
+  step: string,
+  error: unknown,
+  owner: string,
+): Promise<void> {
   const message = error instanceof Error ? error.message : String(error);
   await db.batch([
     db
@@ -337,9 +379,9 @@ export async function markCloseStepFailed(db: D1Database, runId: number, step: s
       .prepare(
         `UPDATE window_close_runs SET status = 'failed', error = ?, updated_at = ${NOW_SQL},
            lease_owner = NULL, lease_expires_at = NULL
-           WHERE id = ? AND status <> 'completed'`,
+           WHERE id = ? AND status <> 'completed' AND lease_owner = ?`,
       )
-      .bind(message, runId),
+      .bind(message, runId, owner),
   ]);
 }
 
@@ -347,6 +389,15 @@ export async function markCloseStepFailed(db: D1Database, runId: number, step: s
  * finalize 批成功后的收口语句（追加进同一个 db.batch 的末尾，与业务同批原子）：
  * step 标 done（attempt+1）+ run 标 completed / completed_at / summary_json（清 error 与租约）。
  * 批内任何语句报错 = 整批回滚，run 不会停在「业务已提交、run 未标完」的半截态。
+ *
+ * B4（F1/F6）：step 语句带 AND status <> 'done'（已 done 的 step 零改行，attempt 不虚增、
+ * 记录不被覆写）；run 语句带 AND status <> 'completed'——接管交错下旧持有者的 finalize 批
+ * 不得覆写 completed run 的 summary_json / attempt / completed_at（D1 batch 里 changes=0
+ * 不中止，见文件头关键陷阱，所以守卫必须写在语句上）。签名保持 4 参、不带 owner：
+ * tests/market-rounds.test.ts TC-ROUTE-07 源码锁逐字锚定本调用形状（文件不在 B4 允许清单）；
+ * 「旧持有者不得清接管者租约」由 window-machine.ts 每段批尾的 renewCloseLease 承担——续租后
+ * 租约在 TTL 内，对手在 finalize 批的提交窗口内无法 acquire，批前围栏（assertCloseLeaseHeld）
+ * 再挡一次；本语句的 status 守卫是防覆写 completed run 的末道围栏。
  *
  * @param summary 完成摘要原文（closeWindow 回执同形对象；调用方必须传可 JSON 序列化值，
  *                completed 重入路径靠它原样返回既有摘要）
@@ -356,14 +407,14 @@ export function completeCloseRun(db: D1Database, runId: number, step: string, su
     db
       .prepare(
         `UPDATE window_close_steps SET status = 'done', attempt = attempt + 1, finished_at = ${NOW_SQL}, error = NULL
-         WHERE run_id = ? AND step = ?`,
+         WHERE run_id = ? AND step = ? AND status <> 'done'`,
       )
       .bind(runId, step),
     db
       .prepare(
         `UPDATE window_close_runs SET status = 'completed', completed_at = ${NOW_SQL}, updated_at = ${NOW_SQL},
            summary_json = ?, error = NULL, lease_owner = NULL, lease_expires_at = NULL
-         WHERE id = ?`,
+         WHERE id = ? AND status <> 'completed'`,
       )
       .bind(JSON.stringify(summary), runId),
   ];
@@ -463,8 +514,9 @@ export function nextPendingStep(steps: CloseStepRow[]): CloseStepRow | null {
  * 段成功收口语句（追加进该段提交批的末尾，与该段业务语句同批原子）：step 标 done（attempt+1、
  * finished_at、error 清空）；带 summary 时同句写入 step 自己的 summary_json（不传 = 不动该列，
  * finalize 段的完成摘要只落 run.summary_json）。批内任何语句报错 = 整批回滚，step 不会停在
- * 「业务已提交、step 未标完」的半截态。不带 status<>'done' 守卫（D1 batch changes=0 不中止是
- * 前提；「不重跑 done 段」由上层纪律与测试锁，不在 SQL 层挡）。
+ * 「业务已提交、step 未标完」的半截态。SQL 层已挡 done 覆写（B4，F1：两分支各带
+ * AND status <> 'done'，对已 done step 零改行——attempt 不虚增、summary_json 是 finalize
+ * 回读源不得被污染）；「不重跑 done 段」的主闸仍由上层 stepDone 判断承担。
  */
 export function completeCloseStep(db: D1Database, runId: number, step: string, summary?: unknown): D1PreparedStatement[] {
   if (summary === undefined) {
@@ -472,7 +524,7 @@ export function completeCloseStep(db: D1Database, runId: number, step: string, s
       db
         .prepare(
           `UPDATE window_close_steps SET status = 'done', attempt = attempt + 1, finished_at = ${NOW_SQL}, error = NULL
-           WHERE run_id = ? AND step = ?`,
+           WHERE run_id = ? AND step = ? AND status <> 'done'`,
         )
         .bind(runId, step),
     ];
@@ -481,7 +533,7 @@ export function completeCloseStep(db: D1Database, runId: number, step: string, s
     db
       .prepare(
         `UPDATE window_close_steps SET status = 'done', attempt = attempt + 1, finished_at = ${NOW_SQL}, error = NULL, summary_json = ?
-         WHERE run_id = ? AND step = ?`,
+         WHERE run_id = ? AND step = ? AND status <> 'done'`,
       )
       .bind(JSON.stringify(summary), runId, step),
   ];

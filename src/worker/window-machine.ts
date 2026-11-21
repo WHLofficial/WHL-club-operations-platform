@@ -37,8 +37,11 @@ import {
   type CloseNotificationItem,
 } from './window-close-outbox.ts';
 // 关窗持久化阶段机（v6.88.0 B2 七段接线）：认领 / 租约 / 七段 step 原语 + closing 行读取
+// B4（v6.88.2）：段提交点围栏 assertCloseLeaseHeld + 批尾续租 renewCloseLease +
+// CloseLeaseLostError（让位零写入），把无锁窗口从 TTL 5 分钟缩到单段构建期
 import {
   acquireCloseLease,
+  assertCloseLeaseHeld,
   appendCloseRunWarnings,
   claimCloseRun,
   CLOSE_LEASE_TTL_MS,
@@ -49,12 +52,14 @@ import {
   CLOSE_STEP_POST_CLOSE,
   CLOSE_STEP_PREFLIGHT,
   CLOSE_STEP_SQUAD_AUDIT,
+  CloseLeaseLostError,
   completeCloseRun,
   completeCloseStep,
   loadCloseRun,
   loadCloseSteps,
   markCloseStepFailed,
   nextPendingStep,
+  renewCloseLease,
   setCloseCurrentStep,
   stepDone,
   type CloseRunRow,
@@ -617,7 +622,11 @@ function squadAuditNotificationItems(
  * 正常路径批前读 parity 与 B1 逐字段一致。
  *
  * 并发与重试口径：claim 批的 status='open' 写闸是唯一认领闸（后到者读已有 run，不重建）；
- * 段推进前再过租约（acquireCloseLease，TTL 5 分钟）；批内不依赖「UPDATE changes=0」挡并发。
+ * 开始前过租约（acquireCloseLease，TTL 5 分钟）；批内不依赖「UPDATE changes=0」挡并发。
+ * B4（v6.88.2）：六个段提交点批前过段围栏 assertCloseLeaseHeld（租约易主抛 CloseLeaseLostError
+ * 409 让位——外层 catch 对它零写入退出）、五个业务段批尾续租 renewCloseLease（finalize 批除外，
+ * completeCloseRun 完成即清租）——把无锁窗口从「TTL 5 分钟」缩到「单段构建期」：跑得久的
+ * 关窗不再等 TTL 过期被接管，接管交错下旧持有者至多损失一个已围栏段。
  */
 export async function closeWindow(
   env: Env,
@@ -676,6 +685,18 @@ export async function closeWindow(
   //    从最小 seq 继续）。全部 step done 而 run 未收口正常流程不可达（finalize 批 = finalize
   //    done + run completed 同批原子，post_close done 只在其后写入），防御分支报 500 ——
   const steps = await loadCloseSteps(db, run.id);
+  // B4（F5）段状态洞校验：steps 必须是「前缀 done」形状——存在 i<j 使 steps[i] 未 done 而
+  // steps[j] 已 done 的洞态（进程死亡 / 库被手工拨步造成）时，nextPendingStep 会静默跳段
+  // 推进异常数据（跳过中间段的业务效果），这里拒绝推进并 409，防重复业务效果
+  const orderedSteps = [...steps].sort((a, b) => a.seq - b.seq);
+  let holeSeen = false;
+  for (const s of orderedSteps) {
+    if (s.status !== 'done') {
+      holeSeen = true;
+    } else if (holeSeen) {
+      throw new HttpError(409, '关窗步骤状态异常（存在跳段），拒绝推进');
+    }
+  }
   const first = nextPendingStep(steps);
   if (first === null) {
     throw new HttpError(500, '关窗步骤已全部完成但运行记录未收口');
@@ -766,11 +787,15 @@ export async function closeWindow(
 
       // 标 preflight done：强约计数落 step 自己的 summary_json（resume 收口回读用），同批把
       // current_step 推进到 payroll——段收口小批原子。v6.88.1 B3：本批强约产生的通知
-      // （promoNotices）以 INSERT OR IGNORE 随同批原子落库 outbox，批回滚则行不落
+      // （promoNotices）以 INSERT OR IGNORE 随同批原子落库 outbox，批回滚则行不落。
+      // B4（F4）段围栏：批前确认租约仍在本手（易主抛 CloseLeaseLostError 让位）、批尾续租
+      // （把无锁窗口压到单段构建期；renewCloseLease 的 CAS 在对手接管后自然零改行）
+      assertCloseLeaseHeld(await loadCloseRun(db, run.id), owner);
       await db.batch([
         ...stageCloseNotificationStatements(db, run.id, promoNotices),
         ...completeCloseStep(db, run.id, CLOSE_STEP_PREFLIGHT, { forceSettled, promotionForceSettled }),
         setCloseCurrentStep(db, run.id, CLOSE_STEP_PAYROLL),
+        renewCloseLease(db, run.id, owner, CLOSE_LEASE_TTL_MS),
       ]);
     }
 
@@ -819,10 +844,13 @@ export async function closeWindow(
     //     已提交前段不回滚；批内不依赖 changes=0 挡并发（互斥由 claim 写闸 + 租约两级承担）——
     if (payroll !== null) {
       currentStep = CLOSE_STEP_PAYROLL;
+      // B4（F4）段围栏：批前确认租约本手、批尾续租（finalize 批除外——completeCloseRun 清租）
+      assertCloseLeaseHeld(await loadCloseRun(db, run.id), owner);
       await db.batch([
         ...payroll.statements,
         ...completeCloseStep(db, run.id, CLOSE_STEP_PAYROLL, payroll.summary),
         setCloseCurrentStep(db, run.id, CLOSE_STEP_HOME),
+        renewCloseLease(db, run.id, owner, CLOSE_LEASE_TTL_MS),
       ]);
     }
     if (home !== null) {
@@ -830,19 +858,25 @@ export async function closeWindow(
       // v6.88.1 B3：home.notifications（情绪变化 / 品牌解约 / 招商轮四模板）不再留到 post_close
       // 直发——随本段批 INSERT OR IGNORE 原子落库 outbox（dedup_key = home:{clubId}:{template}:{序号}），
       // 崩在 home done 与 post_close 之间行已持久，resume 投递不丢
+      // B4（F4）段围栏：批前确认租约本手、批尾续租
+      assertCloseLeaseHeld(await loadCloseRun(db, run.id), owner);
       await db.batch([
         ...home.statements,
         ...stageCloseNotificationStatements(db, run.id, homeNotificationItems(home.notifications)),
         ...completeCloseStep(db, run.id, CLOSE_STEP_HOME, home.summary),
         setCloseCurrentStep(db, run.id, CLOSE_STEP_LOYALTY),
+        renewCloseLease(db, run.id, owner, CLOSE_LEASE_TTL_MS),
       ]);
     }
     if (loyalty !== null) {
       currentStep = CLOSE_STEP_LOYALTY;
+      // B4（F4）段围栏：批前确认租约本手、批尾续租
+      assertCloseLeaseHeld(await loadCloseRun(db, run.id), owner);
       await db.batch([
         ...loyalty.statements,
         ...completeCloseStep(db, run.id, CLOSE_STEP_LOYALTY, loyalty.summary),
         setCloseCurrentStep(db, run.id, CLOSE_STEP_SQUAD_AUDIT),
+        renewCloseLease(db, run.id, owner, CLOSE_LEASE_TTL_MS),
       ]);
     }
     // squad_audit 段：临时窗无业务语句也要标 done（施工表明文），提交闸按段 done 判而非按
@@ -852,11 +886,14 @@ export async function closeWindow(
     if (!stepDone(steps, CLOSE_STEP_SQUAD_AUDIT)) {
       currentStep = CLOSE_STEP_SQUAD_AUDIT;
       const squadNotices = squadAudit === null ? [] : squadAuditNotificationItems(squadAudit.audits, win.season, win.window_seq);
+      // B4（F4）段围栏：批前确认租约本手、批尾续租
+      assertCloseLeaseHeld(await loadCloseRun(db, run.id), owner);
       await db.batch([
         ...(squadAudit?.statements ?? []),
         ...stageCloseNotificationStatements(db, run.id, squadNotices),
         ...completeCloseStep(db, run.id, CLOSE_STEP_SQUAD_AUDIT),
         setCloseCurrentStep(db, run.id, CLOSE_STEP_FINALIZE),
+        renewCloseLease(db, run.id, owner, CLOSE_LEASE_TTL_MS),
       ]);
     }
 
@@ -886,6 +923,9 @@ export async function closeWindow(
     };
     const audit = createAuditStatement(db);
     if (ranFinalize) {
+      // B4（F4）段围栏：finalize 批前确认租约本手。批尾**不**续租——completeCloseRun 的
+      // run 语句带 lease_owner 守卫并清租（完成即放租约），尾追续租会与清租互相覆盖
+      assertCloseLeaseHeld(await loadCloseRun(db, run.id), owner);
       await db.batch([
         db
           .prepare(`UPDATE season_windows SET status = 'closed', closed_at = ${nowSql()} WHERE season = ? AND window_seq = ? AND status = 'closing'`)
@@ -909,7 +949,10 @@ export async function closeWindow(
             home: home.summary,
           },
         }),
-        // step 标 done + run 标 completed / completed_at / summary_json（与业务同批原子）
+        // step 标 done + run 标 completed / completed_at / summary_json（与业务同批原子；
+        // B4（F6）run 语句带 status<>'completed' 守卫——接管交错下旧持有者的 finalize 批不得
+        // 覆写 completed run 的 summary_json/attempt；「不清接管者租约」由批尾续租 + 批前围栏
+        // 承担，见 completeCloseRun JSDoc 的签名口径登记）
         ...completeCloseRun(db, run.id, CLOSE_STEP_FINALIZE, summary),
         setCloseCurrentStep(db, run.id, CLOSE_STEP_POST_CLOSE),
       ]);
@@ -954,11 +997,12 @@ export async function closeWindow(
         warn('海捞开标失败', err);
       }
       // 段收口：有失败 → step 标 failed（markCloseStepFailed 的 run 语句按 status<>'completed'
-      // 守卫不改 run——run 保持 completed）+ warnings 追加进 run.summary_json；全部成功 → 标 done。
+      // 与 lease_owner 守卫不改 run——run 保持 completed，B4（F2）owner 传本手）+
+      // warnings 追加进 run.summary_json；全部成功 → 标 done。
       // 收口自身失败不再外抛：run 已 completed、事实不回滚，下次 closeWindow 走 completed 回放。
       try {
         if (warnings.length > 0) {
-          await markCloseStepFailed(db, run.id, CLOSE_STEP_POST_CLOSE, warnings.join('；'));
+          await markCloseStepFailed(db, run.id, CLOSE_STEP_POST_CLOSE, warnings.join('；'), owner);
           await appendCloseRunWarnings(db, run.id, warnings);
         } else {
           await db.batch([...completeCloseStep(db, run.id, CLOSE_STEP_POST_CLOSE)]);
@@ -970,10 +1014,14 @@ export async function closeWindow(
 
     return summary;
   } catch (err) {
+    // B4（F4）：租约已易主（段围栏 assertCloseLeaseHeld 抛出让位）——零写入退出，跳过失败
+    // 收口：不标当前段 failed、不清新持有者租约、不把 run 翻 failed（接管者正在跑，失败
+    // 收口是它的职责）
+    if (err instanceof CloseLeaseLostError) throw err;
     // 段失败收口（preflight 外部动作 / builders / 任一段批）：单独 batch 标当前段 failed +
     // run failed + error，窗口保持 closing；重试只前进——已提交段不回滚、已 done 段不重跑
     try {
-      await markCloseStepFailed(db, run.id, currentStep, err);
+      await markCloseStepFailed(db, run.id, currentStep, err, owner);
     } catch {
       // 收口失败不掩盖原始错误：run 留在 running，租约 TTL 到期后可重新 acquire
     }

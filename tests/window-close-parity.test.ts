@@ -844,6 +844,165 @@ async function expectCompletedAndNoReplay(fx: Fixture, season: number, windowSeq
   expect(countOf(fx.sqlite, 'audit_log'), '重放零新审计').toBe(auditCount);
 }
 
+// ---------- v6.88.2 B4 · TC-B4-05 恢复 parity A/B 对照 ----------
+
+// loyalty 段打点炸弹（tests/window-close-runs.test.ts B2-05 :609-611 先例同款，打点 loyalty）
+const FAIL_B4_LOYALTY_TRIGGER = `
+  CREATE TRIGGER fail_b4_loyalty BEFORE UPDATE ON window_close_steps
+    WHEN NEW.step = 'loyalty' AND NEW.status = 'done'
+    BEGIN SELECT RAISE(ABORT, 'boom-loyalty'); END;`;
+
+// 一条 pending 合同变更（DDL 亲读 0079:49-70：source 三值 CHECK / wage_new NOT NULL /
+// release_fee_new 可空 / effective_window_seq NOT NULL / 部分唯一索引一球员一条 pending）：
+// source='renewal'、wage 2→3、RC 20→40、effective_window_seq=2（本窗关窗批 apply）
+function pendingRenewalSql(clubA: number): string {
+  return `INSERT INTO contract_pending_changes
+       (player_id, club_id, source, wage_new, release_fee_new, rc_fee, free_rc_change, status, effective_window_seq, created_at)
+     VALUES (50, ${clubA}, 'renewal', 3, 40, 0, 0, 'pending', 2, '2026-07-01T00:00:00Z');`;
+}
+
+describe('v6.88.2 B4 · TC-B4-05 恢复 parity A/B 对照', () => {
+  it('loyalty 段炸后 resume 读已提交状态：漂移按登记口径锁死（allowlist 之外 A/B 逐格全等）', async () => {
+    // 机制（docs/test-plans/v6.88.2-window-close-b4.md TC-B4-05，登记口径 = B4 恢复 parity
+    // 计划 §10.8 第 1 条）：parity 硬口径下四个 builder 在任何业务段提交之前全部构建完 ⇒
+    // A 份 loyalty builder 读 apply 前合同（RC 20）；B 份 loyalty 段炸后 resume 重建，此时
+    // home 批已把 applyPendingContractChanges 落库（home.ts §5.7 接线 + demand-ops.ts 只返回
+    // 语句、随 home 批提交）⇒ 读 apply 后合同（RC 40）⇒ B == round(newRC×rate,2) ≠ A。
+    // 档率 0.05 由 GOLD.mid 同骨架反推亲证（9001: round(20×0.05,2)=1.00、9002: 0.90）。
+    //
+    // —— A 份：干净整窗 ——
+    const fxA = await seedMid();
+    fxA.sqlite.exec(namingContractSql(fxA.clubA));
+    fxA.sqlite.exec(pendingRenewalSql(fxA.clubA));
+    const resultA = await closeWindow(fxA.env, 1, false);
+    const snapA = takeSnapshot(fxA.sqlite);
+    // A 份锚点（同 GOLD.mid 骨架 + pending 效应）：loyalty 9001 = round(20×0.05,2)=1.00、总计 1.9
+    expect(resultA).toMatchObject({ loyalty: { count: 2, total: 1.9 } });
+
+    // —— B 份：loyalty 段炸 → 中间态断言 → DROP 触发器 → resume ——
+    const fxB = await seedMid();
+    fxB.sqlite.exec(namingContractSql(fxB.clubA));
+    fxB.sqlite.exec(pendingRenewalSql(fxB.clubA));
+    fxB.sqlite.exec(FAIL_B4_LOYALTY_TRIGGER);
+    let firstError: unknown = null;
+    try {
+      await closeWindow(fxB.env, 1, false);
+    } catch (err) {
+      firstError = err;
+    }
+    expect(String(firstError)).toContain('boom-loyalty');
+
+    // 中间态（apply 已随 home 批提交的机制锁）：合同已是新值、pending 行已 applied、
+    // preflight/payroll/home done、loyalty failed attempt=1、wage 流水在场（旧值）、
+    // loyalty 流水不在场（首轮批整回滚）
+    expect(sqlGet<{ wage: number; release_fee: number }>(fxB.sqlite, 'SELECT wage, release_fee FROM contracts WHERE id = 1')).toMatchObject({ wage: 3, release_fee: 40 });
+    expect(sqlGet<{ status: string }>(fxB.sqlite, "SELECT status FROM contract_pending_changes WHERE player_id = 50")).toMatchObject({ status: 'applied' });
+    const runB1 = sqlGet<{ id: number; status: string; current_step: string }>(fxB.sqlite, 'SELECT id, status, current_step FROM window_close_runs');
+    expect(runB1).toMatchObject({ status: 'failed', current_step: 'loyalty' });
+    const stepsB1 = sqlAll<{ step: string; status: string; attempt: number }>(fxB.sqlite, 'SELECT step, status, attempt FROM window_close_steps WHERE run_id = ? ORDER BY seq', runB1?.id ?? 0);
+    expect(stepsB1.slice(0, 3).every((s) => s.status === 'done' && s.attempt === 1)).toBe(true);
+    expect(stepsB1[3]).toMatchObject({ step: 'loyalty', status: 'failed', attempt: 1 });
+    expect(stepsB1.slice(4).every((s) => s.status === 'pending' && s.attempt === 0)).toBe(true);
+    expect(sqlGet<{ n: number; total: number }>(fxB.sqlite, "SELECT COUNT(*) AS n, COALESCE(-SUM(amount),0) AS total FROM ledger_entries WHERE club_id = ? AND kind = 'wage'", fxB.clubA)).toMatchObject({ n: 1, total: 2 });
+    expect(sqlGet<{ n: number }>(fxB.sqlite, "SELECT COUNT(*) AS n FROM ledger_entries WHERE kind = 'loyalty'")).toMatchObject({ n: 0 });
+
+    fxB.sqlite.exec('DROP TRIGGER fail_b4_loyalty');
+    const resultB = await closeWindow(fxB.env, 1, false);
+    const snapB = takeSnapshot(fxB.sqlite);
+    // B 份 resume 的 loyalty builder 读 apply 后合同：9001 = round(40×0.05,2)=2.00、总计 2.9（漂移本体）
+    expect(resultB).toMatchObject({ loyalty: { count: 2, total: 2.9 } });
+
+    // —— A/B 快照逐格比对：allowlist 六项之外全等 ——
+    // 全等面①：windows / rounds / contracts（apply 后两边一致）/ registrations / naming
+    //（windows_remaining 两边同为 2——home 段不重建 ⇒ 收租/递减恰一次，resume 不双扣冠名）/
+    // stadiums（fans 不二次演化）/ closeNotifications（零行）/ notifications（零行）
+    expect(snapB.windows).toEqual(snapA.windows);
+    expect(snapB.rounds).toEqual(snapA.rounds);
+    expect(snapB.contracts).toEqual(snapA.contracts);
+    expect(snapB.registrations).toEqual(snapA.registrations);
+    expect(snapB.naming).toEqual(snapA.naming);
+    expect(snapB.stadiums).toEqual(snapA.stadiums);
+    expect(snapB.closeNotifications).toEqual(snapA.closeNotifications);
+    expect(snapB.notifications).toEqual(snapA.notifications);
+    // 全等面②：9002 余额逐格相等；9001 余额差 = allowlist 1（登记与 ask 字面偏差：ask 列
+    // 「balances 全等」，但 9001 终值必差 1.00，按「9002 全等 + 9001 差额可归因」口径写）
+    expect(snapB.accounts.filter((a) => a.club_id === 9002)).toEqual(snapA.accounts.filter((a) => a.club_id === 9002));
+    expect(snapA.accounts.find((a) => a.club_id === 9001)).toMatchObject({ balance: 98 });
+    expect(snapB.accounts.find((a) => a.club_id === 9001)).toMatchObject({ balance: 97 });
+
+    // 全等面③：流水——排除 9001 的 loyalty 行（allowlist 1 及其 balance_after 连带）后
+    // 逐格相等（含 balance_after；自增 id 剥离、按 (club_id, kind, memo) 内容列对齐）
+    const entriesOf = (snap: ParitySnapshot) =>
+      snap.entries
+        .map(({ id: _id, ...rest }) => rest)
+        .sort((x, y) => `${x.club_id}|${x.kind}|${x.memo}`.localeCompare(`${y.club_id}|${y.kind}|${y.memo}`));
+    const restOf = (snap: ParitySnapshot) =>
+      entriesOf(snap).filter((e) => !(e.club_id === 9001 && e.kind === 'loyalty'));
+    expect(restOf(snapB)).toEqual(restOf(snapA));
+    // allowlist 1：9001 loyalty 行金额与 balance_after（B == round(newRC×rate,2) ≠ A）
+    const loyaltyA = snapA.entries.find((e) => e.club_id === 9001 && e.kind === 'loyalty');
+    const loyaltyB = snapB.entries.find((e) => e.club_id === 9001 && e.kind === 'loyalty');
+    expect(loyaltyA).toMatchObject({ amount: -1, balance_after: 98 });
+    expect(loyaltyB).toMatchObject({ amount: -2, balance_after: 97 });
+
+    // 全等面④：审计——排除 loyalty_charge(9001)（allowlist 2）与 window_close
+    //（allowlist 6）后逐格相等（剥自增 id）
+    const auditsOf = (snap: ParitySnapshot) =>
+      snap.auditLog
+        .map(({ id: _id, ...rest }) => rest)
+        .sort((x, y) => `${x.action}|${x.target_type}|${x.target_id}`.localeCompare(`${y.action}|${y.target_type}|${y.target_id}`));
+    const restAudits = (snap: ParitySnapshot) =>
+      auditsOf(snap).filter((a) => !((a.action === 'loyalty_charge' && a.target_id === 9001) || a.action === 'window_close'));
+    expect(restAudits(snapB)).toEqual(restAudits(snapA));
+    // allowlist 2：每队 loyalty_charge 审计恰 1 行（无双收口）；9001 的 after.amount 漂移、
+    // 9002 两边相等
+    const chargeOf = (snap: ParitySnapshot, clubId: number) =>
+      snap.auditLog.filter((a) => a.action === 'loyalty_charge' && a.target_id === clubId);
+    expect(chargeOf(snapA, 9001)).toHaveLength(1);
+    expect(chargeOf(snapB, 9001)).toHaveLength(1);
+    expect(chargeOf(snapA, 9002)).toHaveLength(1);
+    expect(chargeOf(snapB, 9002)).toHaveLength(1);
+    expect(JSON.parse(chargeOf(snapA, 9001)[0]?.after ?? '{}')).toMatchObject({ contracts: 1, amount: 1 });
+    expect(JSON.parse(chargeOf(snapB, 9001)[0]?.after ?? '{}')).toMatchObject({ contracts: 1, amount: 2 });
+    expect(chargeOf(snapB, 9002)[0]?.after).toBe(chargeOf(snapA, 9002)[0]?.after);
+    // allowlist 6：window_close 审计 after.loyaltyTotal（A 1.9 / B 2.9，与 run.summary 同源）；
+    // after 剥 loyaltyTotal 后逐格相等
+    const closeAuditA = JSON.parse(snapA.auditLog.find((a) => a.action === 'window_close')?.after ?? '{}');
+    const closeAuditB = JSON.parse(snapB.auditLog.find((a) => a.action === 'window_close')?.after ?? '{}');
+    expect(closeAuditA).toMatchObject({ loyaltyTotal: 1.9, loyaltyCount: 2 });
+    expect(closeAuditB).toMatchObject({ loyaltyTotal: 2.9, loyaltyCount: 2 });
+    expect({ ...closeAuditB, loyaltyTotal: closeAuditA.loyaltyTotal }).toEqual(closeAuditA);
+
+    // allowlist 3：squad_audits.stats_json.wageNow 漂移（A 读 apply 前裸和 2 / B 读 apply 后 3，
+    // squad-audit.ts wageNow = SUM(contracts.wage) 不吃 pending）；wageAfter 两边同为 3
+    //（= wageNow + 本窗到期 pending 增量，A 2+(3−2)=3、B 3+0=3）——数值相等本身要断言；
+    // 9002 两边 wageNow/wageAfter 同 1.5（无 pending）
+    const statsA1: Record<string, unknown> = JSON.parse(snapA.squadAudits.find((s) => s.club_id === 9001)?.stats_json ?? '{}');
+    const statsB1: Record<string, unknown> = JSON.parse(snapB.squadAudits.find((s) => s.club_id === 9001)?.stats_json ?? '{}');
+    expect(statsA1).toMatchObject({ wageNow: 2, wageAfter: 3 });
+    expect(statsB1).toMatchObject({ wageNow: 3, wageAfter: 3 });
+    expect(statsA1.wageAfter).toBe(statsB1.wageAfter);
+    expect({ ...statsB1, wageNow: statsA1.wageNow }).toEqual(statsA1);
+    expect(snapB.squadAudits.find((s) => s.club_id === 9002)).toEqual(snapA.squadAudits.find((s) => s.club_id === 9002));
+
+    // allowlist 4/5：run+step 的 loyalty 汇总（A 1.9 / B 2.9）与 loyalty attempt（A 1 / B 2）；
+    // 其余 run/step 列剥漂移项后逐格相等
+    const runA = JSON.parse(snapA.runs[0]?.summary_json ?? 'null') as Record<string, unknown>;
+    const runB = JSON.parse(snapB.runs[0]?.summary_json ?? 'null') as Record<string, unknown>;
+    expect(runA.loyalty).toMatchObject({ count: 2, total: 1.9 });
+    expect(runB.loyalty).toMatchObject({ count: 2, total: 2.9 });
+    expect({ ...runB, loyalty: runA.loyalty }).toEqual(runA);
+    expect(snapB.runs[0]?.status).toBe(snapA.runs[0]?.status);
+    const stepsA = snapA.steps;
+    const stepsB = snapB.steps;
+    const loyaltyStepA = stepsA.find((s) => s.step === 'loyalty');
+    const loyaltyStepB = stepsB.find((s) => s.step === 'loyalty');
+    expect(loyaltyStepA).toMatchObject({ status: 'done', attempt: 1 });
+    expect(loyaltyStepB).toMatchObject({ status: 'done', attempt: 2 });
+    expect(stepsB.filter((s) => s.step !== 'loyalty')).toEqual(stepsA.filter((s) => s.step !== 'loyalty'));
+  });
+});
+
 // ---------- 金样用例 ----------
 
 describe('v6.88.0 closeWindow parity 金样（B1 基线）', () => {

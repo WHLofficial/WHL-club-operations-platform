@@ -4,6 +4,26 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.88.2] · B4 关窗并发围栏与恢复 parity：段级租约围栏 + 让位零写入 + 洞校验（2026-11-21，本地未 push）
+
+**Fixed**
+
+- 关窗接管交错下旧持有者可覆写已 done 段（attempt 虚增 / `summary_json` 污染——finalize 回读源）：`completeCloseStep` 两分支与 `completeCloseRun` step 语句各加 `AND status <> 'done'`，SQL 层挡 done 覆写（`src/worker/window-close-runs.ts`，F1）。
+- 旧持有者的失败收口清新持有者租约并把 run 翻 failed：`markCloseStepFailed` 加第 5 参 `owner`，run 语句加 `AND lease_owner = ?`（F2）；`completeCloseRun` run 语句加 `AND status <> 'completed'` 守卫（F6）——接管交错下旧持有者 finalize 批不得覆写 completed run 的 summary_json/attempt；签名保持 4 参以兼容 TC-ROUTE-07 源码锁，「不清接管者租约」面由批尾续租 + 批前围栏承担（纵深防御取舍见 `completeCloseRun` JSDoc 与测试计划 §7.4-8）。
+
+**Added**
+
+- 关窗租约段级原语（`src/worker/window-close-runs.ts`，F3）：`renewCloseLease`（CAS 续租语句，批尾追加与业务同批原子；owner 匹配才续期，对手接管后自然零改行）、`assertCloseLeaseHeld`（失配抛 `CloseLeaseLostError`，409「关窗租约已易主，本次请求让位」）。
+- 六个段提交点围栏（`src/worker/window-machine.ts`，F4）：preflight 收口 / payroll / home / loyalty / squad_audit / finalize 批前 `assertCloseLeaseHeld`、五个业务段批尾 `renewCloseLease` 续租（finalize 批除外——完成即清租）；外层 catch 对 `CloseLeaseLostError` 零写入让位（跳过 `markCloseStepFailed` 直接 rethrow）。无锁窗口从 TTL 5 分钟缩到单段构建期。
+- 段状态洞校验（F5）：steps 非前缀 done 形状（∃ i<j 使 steps[i] 未 done 且 steps[j] done）时 409「关窗步骤状态异常（存在跳段），拒绝推进」——`nextPendingStep` 不再静默跳段推进异常数据。
+
+**Tests**
+
+- `tests/window-close-recovery.test.ts`（新，18 例）：并发 claim 双局对账、偷租围栏端到端（触发器注入等价 TTL 过期接管）、旧持有者 catch 三相、loyalty 段失败、段状态洞两形态 409、死亡跳段 completed 回放零写 + outbox 保持、冻结中间态、F1/F3/renew 边界/assert 原语单元、resume 摘要防御 500、六提交点源码文本锁、已提交段重放 × 账本闸（M5 载体）。
+- `tests/window-close-parity.test.ts` 追加 TC-B4-05 恢复 parity A/B 对照（allowlist 六项之外逐格全等；GOLD 三局未动）。
+- 4 文件套件 72/72；`npm run typecheck` 三份清；`npm test` 净 +19 例（修复轮后全量绿）；变异矩阵 M1…M6 全命中并逐字还原；修复轮 5 文件套件（4 关窗文件 + market-rounds）150/150。
+- `docs/test-plans/v6.88.2-window-close-b4.md` §7 回填执行记录。`package.json` 6.88.1 → 6.88.2。
+
 ## [v6.88.1] · 关窗通知 outbox 化：三段落库 + post_close 统一投递 + 管理端状态与重投（2026-11-21）
 
 **Added**

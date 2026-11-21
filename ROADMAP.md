@@ -162,6 +162,28 @@
 
 **未覆盖与部署前置**：e2e 未在本批执行；UI 真浏览器人工复核无留存记录；firstError 诊断缺口未采纳（status/retry 响应不带投递失败原因，管理员查 failed 原因须直连 D1）；生产 apply 与上线回读未做。**部署铁律：迁移 `0097` 先 apply 再 push**（CF Workers Builds 无迁移步骤；新代码在无表生产上任何关窗段批 INSERT 即炸、关窗全断）。
 
+---
+
+## v6.88.2 · B4 关窗并发围栏与恢复 parity：段级租约围栏 + 让位零写入 + 洞校验（2026-11-21，本地未 push）
+
+**缘起**：v6.88.0 B2 的七段阶段机留下两个并发/恢复缺口——① 租约只在开始时 acquire（TTL 5 分钟），关窗跑得久或卡住时对手须等 TTL 过期才能接管，接管交错下旧持有者仍可把已 done 段覆写（attempt 虚增 / summary_json 污染——summary 是 finalize 回读源）、旧持有者的失败收口会清新持有者租约并翻 run；② `nextPendingStep` 对「非前缀 done」的洞态 steps 静默跳段推进。B4 按施工表 F1–F7 落地围栏；测试计划 `docs/test-plans/v6.88.2-window-close-b4.md`（TC-B4-01…18 + M1…M6，§7 为施工轮执行记录）。
+
+**交付（六件，全部本地、零迁移零生产写）**：
+- `src/worker/window-close-runs.ts`：F1——`completeCloseStep` 两分支与 `completeCloseRun` step 语句各加 `AND status <> 'done'`（SQL 层挡 done 覆写，attempt 不虚增、summary 不被污染）；F2——`markCloseStepFailed` 加第 5 参 `owner`，run 语句加 `AND lease_owner = ?`（旧持有者失败收口不清新持有者租约、不翻 run）；F3——新原语 `renewCloseLease(db, runId, owner, ttlMs)`（CAS 续租语句，批尾追加与业务同批原子）、`assertCloseLeaseHeld(run, owner)`（失配抛导出的 `CloseLeaseLostError extends HttpError(409, '关窗租约已易主，本次请求让位')`）；F6——`completeCloseRun` run 语句加 `AND status <> 'completed'`（末道围栏：接管交错下旧持有者 finalize 批不得覆写 completed run 的 summary_json/attempt；签名保持 4 参——TC-ROUTE-07 源码锁锚定该调用形状，「清新持有者租约」面由批尾续租 + 批前围栏承担，详见测试计划 §7.4-8）。
+- `src/worker/window-machine.ts`：F4——六个段提交点（preflight 收口 / payroll / home / loyalty / squad_audit / finalize）批前 `assertCloseLeaseHeld(await loadCloseRun(...), owner)` 内联围栏、五个业务段批尾 `renewCloseLease` 续租（finalize 批除外——completeCloseRun 完成即清租）；外层 catch 对 `CloseLeaseLostError` **跳过 markCloseStepFailed 直接 rethrow**（让位 = 零写入：不标段 failed、不清新租约、不翻 run）；`markCloseStepFailed` 两调用点与 `completeCloseRun` 调用点传 owner。F5——`loadCloseSteps` 后洞校验：steps 必须「前缀 done」形状（∃ i<j 使 steps[i] 未 done 且 steps[j] done 即洞），破则 409「关窗步骤状态异常（存在跳段），拒绝推进」。效果：无锁窗口从「TTL 5 分钟」缩到「单段构建期」——跑得久的关窗不再被过期接管，接管交错下旧持有者至多损失一个已围栏段。
+- `tests/window-close-recovery.test.ts`（新）：18 例——TC-B4-01 并发 claim 双局对账 / TC-B4-03 偷租围栏端到端（temp 窗 + 偷租触发器 + 对照局）/ TC-B4-04 三相（围栏先手 + F2 直接面 + owner 匹配对照）/ TC-B4-06 loyalty 段失败 / TC-B4-07+13 洞 409 两形态 / TC-B4-08 死亡跳段 completed 回放零写 + outbox 保持 + deliver 直调恢复 / TC-B4-09 冻结中间态 / TC-B4-10 F1 no-op 与 renew CAS 单元 / TC-B4-12 assert 原语 / TC-B4-14 偷租态第三方 POST / TC-B4-15 resume 摘要回读防御 500 / TC-B4-16 源码文本锁 / TC-B4-17 renew 边界 / TC-B4-18 登记面 + M5 载体。
+- `tests/window-close-parity.test.ts`：追加 TC-B4-05 恢复 parity A/B 对照（B 份 loyalty 段炸后 resume，漂移按计划 §10.8 第 1 条登记口径锁死：allowlist 六项之外 A/B 逐格全等；GOLD 三局一字未动）。
+- `package.json` 6.88.1 → 6.88.2。
+- `docs/test-plans/v6.88.2-window-close-b4.md` §7 回填执行记录。
+
+**验收（2026-11-21 实测）**：4 文件套件 `node node_modules/vitest/vitest.mjs run tests/window-close-runs.test.ts tests/window-close-outbox.test.ts tests/window-close-parity.test.ts tests/window-close-recovery.test.ts` → **4 files / 72 passed**（runs 29 + outbox 21 + parity 4 + recovery 18；runs/outbox 一字未改）；`npm run typecheck` 三份 EXIT=0；`npm test` 全量 221 文件 / **3431 passed + 1 failed**（净 +19 例 = recovery 18 + parity 1）。变异矩阵 M1…M6 逐条注入全部命中并逐字还原（`git status` 对 `ledger.ts` 零输出）：M1→TC-B4-10 红、M2→TC-B4-04 红、M3→恰 4 红（03/04/14/16）、M4→恰 3 红（07/13/18 登记面，载体保持绿）、M5→TC-B4-18 红（wage 双记）且 T05 等 runs 29 例全绿（§3 预判实测证实）、M6→TC-B4-05 红（GOLD 与 runs 全绿；「attempt=2」预判被 F1 守卫反转，按实测登记）。
+
+**执行轮对计划的三处裁决登记**（详见计划 §7.4）：① TC-B4-18 拨步列改写——计划原稿的「finalize/post_close 保持 done」在 F5 下是后缀洞态必被 409 拒，载体改前缀形状（payroll..post_close 全 pending）、M5 红面改 wage（seedWindow 无 stadiums 行，maintenance 本就 0 行），原拨步列改为 F5 语义登记面用例；② 「squad_audits 行数翻倍」预判不成立——体检存档是 `INSERT OR REPLACE`（squad-audit.ts:244）幂等覆写；③ TC-B4-01 败者 409 文案按三分支集合口径（交错时点决定）。
+
+**修复轮（2026-11-21，脚本指令「目标测失败，修复」）**：首版 F6 的第 5 参 `owner` 打破 `tests/market-rounds.test.ts` TC-ROUTE-07 源码锁（锚点逐字 `...completeCloseRun(db, run.id, CLOSE_STEP_FINALIZE, summary),`，:1857-1859）⇒ 全量恒 1 红；修复指令允许清单仍不含该测试文件 ⇒ 改在实现侧兼容：`completeCloseRun` 回 4 参签名、run 语句守卫换 `AND status <> 'completed'`（F6 why 字面目标由此完整达成；「不清接管者租约」面由每段批尾续租承担——续租后租约在 TTL 内，对手在 finalize 批提交窗口内无法 acquire——加批前围栏，纵深防御取舍登记在 `completeCloseRun` JSDoc 与计划 §7.4-8）。修复后：`node node_modules/vitest/vitest.mjs run tests/market-rounds.test.ts -t "TC-ROUTE-07"` → 1 passed；5 文件套件（4 关窗文件 + market-rounds）→ **5 files / 150 passed**；`npm run typecheck` EXIT=0。
+
+**待办（deferred）**：`npm run build` 未跑（B4 无前端改动）；未 commit、未 push、未部署。
+
 ## v6.88.0 · 关窗持久化阶段机 B1+B2：closing/claim/租约/冻结 + 七段拆分与 parity（2026-11-21，已上线 Version dc2c29a2）
 
 **缘起**：D1 `batch()` 的 `meta.changes=0` 是成功结果、不会中止后续语句——现有 `closeWindow` 批后 409「窗口刚被关过了」只是**事后报错**，并发后到者仍会提交工资/主场/忠诚/体检；`naming-ops.ts:1130-1140` 无本窗结算守卫，会多减合同期。用户裁决走 **B 持久化阶段机**，并定：closing 期间冻结全部俱乐部写操作、失败只前进重试、B1 先落 7 段中的单 step 骨架（B2 拆段）。
