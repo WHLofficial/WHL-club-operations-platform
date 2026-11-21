@@ -4,6 +4,20 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
+## [v6.88.3] · 构建目标降级：兼容国产浏览器旧内核（2026-11-21，已上线 Version 327aee19）
+
+**Fixed**
+
+- 红米手机上百度 / QQ 浏览器打开站点只有背景色：Vite 未设 `build.target`、默认 `es2020`，主包 474 处 `??`（Chrome 80+）在 Chromium 66–79 解析期 SyntaxError，整个 bundle 不执行。`vite.config.ts` 设 `target: ["chrome79", "safari13"]` 后主包 `??` 语法归零，gzip 234.70 → 239.75 KB（+5.05 KB）。
+
+**Added**
+
+- `tests/build-target.test.ts` 3 例静态锁（chrome79 / safari13 必须在列、不得回 `esnext`）；测试计划 `docs/test-plans/v6.88.3-legacy-browser-target.md`。
+
+**Tests**
+
+- typecheck 三份全清、`npm test` 222 文件 / 3435 例全绿、build 成功；hotfix 基线（`origin/main` + 本枚）同验。上线回读线上资产 `index-CXnEKRfz.js` 与本地一致、版本串 `6.88.3`、`/api/health` 200。
+
 ## [v6.88.2] · B4 关窗并发围栏与恢复 parity：段级租约围栏 + 让位零写入 + 洞校验（2026-11-21，本地未 push）
 
 **Fixed**

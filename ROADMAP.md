@@ -134,6 +134,20 @@
 
 ---
 
+## v6.88.3 · 构建目标降级：兼容国产浏览器旧内核（2026-11-21，已上线 Version 327aee19）
+
+**缘起**：用户报告红米手机上百度 / QQ 浏览器打开 `club.whleague.win` 只有背景色。诊断：线上 HTML 只有一个 `<script type="module">`（无 `nomodule` 回退），Vite 6.4.3 未设 `build.target`、默认 `es2020`，主包含 474 处 `??`（Chrome 80+ 才支持）⇒ 旧内核（Chromium 66–79）在解析期直接 SyntaxError，整个 bundle 一行不执行，`#root` 为空、只剩 CSS 背景色。CSS 单独 200 排除了网络 / 404 / 缓存。
+
+**交付**：`vite.config.ts` 设 `build.target: ["chrome79", "safari13"]`；新增 `tests/build-target.test.ts` 3 例静态锁；测试计划 `docs/test-plans/v6.88.3-legacy-browser-target.md`。
+
+**验收**：typecheck 三份全清、`npm test` 222 文件 / 3435 例全绿、build 成功；主包 `??` 语法 474 → **0**（`xlsx` chunk 内 108 处是字符串 `# ??/??`，非语法），gzip 234.70 → 239.75 KB（+5.05 KB）；esbuild 按 chrome79 复核无待转换项。
+
+**上线**：本地还压着 v6.88.1/v6.88.2 且迁移 `0097` 未 apply，本轮从 `origin/main` 单独 cherry-pick（`hotfix/build-target` 分支，`40bcbe5`）只推这一枚，push `ed61dc5..40bcbe5` ⇒ CF 自动部署 Version **`327aee19-47d4-4fbf-b7e3-8a630a7be87e`**（2026-11-21T13:02:03Z）。回读：线上 `assets/index-CXnEKRfz.js` 与 hotfix 构建逐字同名、线上 JS 版本串 `6.88.3`、`??` 语法 0、`/api/health` 200（d1 / tour_db / kv 全 ok）。
+
+**未验证**：真机复测（红米 + 百度 / QQ 浏览器）。**边界**：只保 Chromium 79+，更低内核需 `@vitejs/plugin-legacy`（未做）；`:has()` 等 CSS 特性在旧内核仍会被丢弃，只影响样式细节、不白屏。
+
+---
+
 ## v6.88.1 · 关窗通知 outbox 化：三段落库 + post_close 统一投递 + 管理端状态与重投（2026-11-21）
 
 **缘起**：v6.88.0 B2 的 post_close 段把三类关窗通知（promotion_forced / home 段四模板 naming_* / squad_audit_failed）在 finalize 之后**直发**——崩在「段 done 与 post_close 之间」或 resume 跳过已 done 段时通知永久丢失（B2 自认注释原文「resume 跳过段的产出……数据不可得（B4 恢复范围）」）；且 `notifications.payload` 只落 `{text,...}` 渲染文本、查不到 season/windowSeq，squad_audit_failed 的 LIKE 查重恒不命中。B3 按施工表把三类通知改 **outbox 化**；测试计划 `docs/test-plans/v6.88.1-window-close-b3.md`（qa-test-planner，评审版 2/3），本地提交三枚 `a595c62`（主施工）→ `8e40a26` → `1f11b7e`（评审修复）。
