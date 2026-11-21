@@ -205,19 +205,29 @@ export function renderNotification(template: string, data: Record<string, unknow
   }
 }
 
+/** queueClubNotificationEx 的返回：ok=false 时 error 带回失败原因（不再吞错），调用方判 failed */
+export interface QueueNotificationResult {
+  ok: boolean;
+  count: number;
+  error?: string;
+}
+
 /**
- * 给一个俱乐部排通知（尽力而为：排队失败不抛——通知绝不阻塞主流程，§12-2）。
+ * 给一个俱乐部排通知（严格版）：成功 {ok:true, count}、失败 {ok:false, error}，不抛。
  * 双通道（v2.4.0 站内信）：web 行按绑定账号逐人写（status='sent' 免投递，收件篮读）；
  * QQ 行照旧只写给 qq_links 命中的账号。绑定真源在 auth 库（v1.0.0）：先按 club_id 从
  * AUTH_DB 取绑定账号，再查本地 qq_links；AUTH_DB 未配置回落本地休眠表（回滚通道）。
+ * 无收件人（clubId null / 无绑定账号）是完成态不是失败：{ok:true, count:0}。
+ * v6.88.1 B3：原 queueClubNotification 函数体上移为 Ex（关窗通知 outbox 投递需要区分成败），
+ * 旧入口改为薄壳保持「吞错、失败返 0」旧行为，既有调用方零改动。
  */
-export async function queueClubNotification(
+export async function queueClubNotificationEx(
   env: Env,
   clubId: number | null,
   template: string,
   data: Record<string, unknown>,
-): Promise<number> {
-  if (clubId === null) return 0;
+): Promise<QueueNotificationResult> {
+  if (clubId === null) return { ok: true, count: 0 };
   const db = env.DB;
   try {
     let accountIds: number[];
@@ -235,7 +245,7 @@ export async function queueClubNotification(
         .all<{ user_id: number }>();
       accountIds = bound.results.map((r) => r.user_id);
     }
-    if (accountIds.length === 0) return 0;
+    if (accountIds.length === 0) return { ok: true, count: 0 };
     const placeholders = accountIds.map(() => '?').join(', ');
     const qqs = await db
       .prepare(`SELECT user_id, qq FROM qq_links WHERE user_id IN (${placeholders}) ORDER BY user_id LIMIT 5`)
@@ -273,10 +283,26 @@ export async function queueClubNotification(
           .bind(clubId, r.user_id, template, JSON.stringify({ qq: r.qq, text })),
       ),
     ]);
-    return accountIds.length + qqs.results.length;
-  } catch {
-    return 0;
+    return { ok: true, count: accountIds.length + qqs.results.length };
+  } catch (err) {
+    // 不吞错：错误带回调用方判 failed（旧入口薄壳仍吞错返 0，行为零变化）
+    return { ok: false, count: 0, error: err instanceof Error ? err.message : String(err) };
   }
+}
+
+/**
+ * 给一个俱乐部排通知（旧入口，尽力而为：排队失败不抛——通知绝不阻塞主流程，§12-2）。
+ * v6.88.1 B3 起为 queueClubNotificationEx 的薄壳：ok:false → 0，ok:true → count（含无绑定 0），
+ * 旧行为「吞错、失败返 0」逐字保留，既有调用方零改动。
+ */
+export async function queueClubNotification(
+  env: Env,
+  clubId: number | null,
+  template: string,
+  data: Record<string, unknown>,
+): Promise<number> {
+  const r = await queueClubNotificationEx(env, clubId, template, data);
+  return r.ok ? r.count : 0;
 }
 
 /**

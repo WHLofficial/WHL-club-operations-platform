@@ -632,6 +632,68 @@ export interface CloseWindowResult {
   home: CloseWindowHomeSummary;
 }
 
+// ---------------------------------------------------------------------------
+// 关窗通知 outbox · 管理端状态（v6.88.1 B3，GET /api/admin/windows/close/status +
+// POST /api/admin/windows/close/notifications/retry）。worker 装配：routes/admin/market.ts
+// （loadWindowCloseStatus 文件内装配，return 标注 + c.json 泛型双锁）；outbox 行真源在
+// window_close_notifications（迁移 0097），投递原语在 worker/window-close-outbox.ts。
+// ---------------------------------------------------------------------------
+
+/** 关窗 run 投影（status 端点的 run 块）：window_close_runs 行 camelCase 投影 + warnings。
+ *  ⚠️ 不透传 summaryJson 全文（B2 过渡语义下它是关窗回执 + warnings 混合体，管理面只拆
+ *  warnings 数组）；租约字段（leaseOwner/leaseExpiresAt）是调度内部细节，同样不外发。 */
+export interface WindowCloseStatusRun {
+  id: number;
+  season: number;
+  windowSeq: number;
+  /** running/failed/completed（迁移 0096 口径；列本身是 TEXT，异常值原样透传） */
+  status: string;
+  /** 正在推进 / 最后推进的段名（CLOSE_STEPS 七段之一；window_close_steps.step 同域） */
+  currentStep: string;
+  startedAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+  error: string | null;
+  /** run.summary_json 的 warnings 数组（post_close 部分失败的归档）；坏 JSON / 缺键按空处理 */
+  warnings: string[];
+}
+
+/** 关窗七段 step 投影（status 端点的 steps[]，按 seq 升序恰 7 行）：window_close_steps 行投影，
+ *  不含 runId（run 块已带）与 summaryJson（段摘要不进管理面）。 */
+export interface WindowCloseStatusStep {
+  step: string;
+  seq: number;
+  /** pending/done/failed（迁移 0096 DDL CHECK 紧枚举口径） */
+  status: string;
+  attempt: number;
+  startedAt: string | null;
+  finishedAt: string | null;
+  error: string | null;
+}
+
+/** 关窗状态面板载荷（GET /api/admin/windows/close/status，v6.88.1 B3）。window 与 run 恒同窗
+ *  配对：有任何 run 时 window = 最近一次关窗的窗口行（窗口可能已 closed——重试通知要能看到
+ *  最近 run 的失败通知）；无任何 run 时 window = 最新窗口行（全库无窗口行才为 null），
+ *  此时 run=null、steps=[]、notifications 计数全 0。 */
+export interface WindowCloseStatus {
+  window: WindowRow | null;
+  run: WindowCloseStatusRun | null;
+  /** 七段步骤行（按 seq 升序；run 不在场时 []） */
+  steps: WindowCloseStatusStep[];
+  /** 最近 run 的 outbox 通知计数（window_close_notifications 按 status 分组计数；status CHECK
+   *  外的异常值不计入，三键恒在场） */
+  notifications: { pending: number; sent: number; failed: number };
+}
+
+/** 通知重投回执（POST /api/admin/windows/close/notifications/retry）：对最近 run 的
+ *  pending/failed 行重投；delivered + failed + skipped = 捞到的行数，skipped 是防御值恒 0
+ *  （已 sent 的行不进投递查询，坏 payload 计 failed 不计 skipped）。 */
+export interface WindowCloseNotifyRetryResult {
+  delivered: number;
+  failed: number;
+  skipped: number;
+}
+
 /** 关窗页实时看板逐队一行（GET /admin/windows/overview，v6.69.0 期三；wrap 在 {clubs} 下）。
  *  worker 内部名 SquadAuditRow（squad-audit.ts，loadWindowOverview）——甄别 naming：
  *  仅类型名不同，16 字段同名同型。 */

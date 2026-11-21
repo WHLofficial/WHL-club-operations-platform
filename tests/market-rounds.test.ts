@@ -1857,7 +1857,9 @@ describe('冠名市场与招商轮路由（TC-ROUTE）', () => {
       '...completeCloseRun(db, run.id, CLOSE_STEP_FINALIZE, summary),',
       closeAllBatch,
     );
-    const notifyAt = machineSrc.indexOf('for (const n of home.notifications) {', completeAt);
+    // v6.88.1 B3：home.notifications 直发块已删（段内 outbox 落库 + post_close 统一投递）——
+    // 时序锁精神不变，锁的是新投递点「finalize 之后才发通知」（post_close 段内的 deliverCloseNotifications）
+    const notifyAt = machineSrc.indexOf('deliverCloseNotifications(env, run.id)', completeAt);
     expect(closeAllStart).toBeGreaterThan(-1);
     expect(closeAllBatch).toBeGreaterThan(closeAllStart);
     expect(completeAt).toBeGreaterThan(closeAllBatch);

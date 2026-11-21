@@ -10,13 +10,24 @@ import { adminVoidBid, adminForceSettle, adminForceVoid, adminForceSign, adminRe
 import { backfillOfferBetTerms } from '../../market-ops.ts';
 // 契约类型锚点（v6.82.0 第 4 批）：窗口三端点与看板的 c.json 泛型以 src/contract/batch4.ts 为真源
 // （开/关窗回执由 window-machine 的 return 标注互锁，这里泛型是第二道编译期锁）。
-import type { CloseWindowResult, OpenWindowResult, WindowOverviewRow, WindowsResponse } from '../../../contract/batch4.ts';
+// v6.88.1 B3：关窗状态面板与通知重投回执两型同真源（loadWindowCloseStatus return 标注双锁）。
+import type {
+  CloseWindowResult,
+  OpenWindowResult,
+  WindowCloseNotifyRetryResult,
+  WindowCloseStatus,
+  WindowOverviewRow,
+  WindowsResponse,
+} from '../../../contract/batch4.ts';
 // 契约类型锚点（v6.82.0 第 6 批）：强拍三端点（preview / create / cancel）的 c.json 泛型以
 // src/contract/batch6.ts 为真源（写侧编译期锁；preview 的 inspectForcedAuction 返回 worker 内部名
 // ForcedAuctionInspection，与契约 ForcedAuctionPreview 结构全同、可赋值）。
 import type { ForcedAuctionCancelResult, ForcedAuctionPreview, ForcedAuctionResult } from '../../../contract/batch6.ts';
 import { listWindows, openWindow, closeWindow } from '../../window-machine.ts';
 import { loadWindowOverview } from '../../squad-audit.ts';
+// 关窗通知 outbox（v6.88.1 B3）：重投原语 + run/step 行读取（window-close-runs.ts 的 camel 映射复用）
+import { retryCloseNotifications } from '../../window-close-outbox.ts';
+import { loadCloseRun, loadCloseSteps, type CloseRunRow } from '../../window-close-runs.ts';
 import { createForcedAuction, cancelForcedAuction, inspectForcedAuction } from '../../bypass.ts';
 import { readJson } from './shared.ts';
 
@@ -163,6 +174,138 @@ app.post('/windows/close', async (c) => {
   const body = (await readJson(c)) as { force?: unknown } | null;
   return c.json<CloseWindowResult>(await closeWindow(c.env, user.id, body?.force));
 });
+
+// GET /api/admin/windows/close/status —— 关窗进度状态（v6.88.1 B3）：最近一次关窗 run 的
+// 七段进度 / warnings / outbox 通知计数，供管理端进度面板消费。window 与 run 恒同窗配对
+// （有 run 取该 run 的窗口行——窗口可能已 closed，重试通知要能看到最近 run 的失败通知；
+// 无任何 run 取最新窗口行），契约形状见 WindowCloseStatus 型注。权限取严口径随 GET /windows
+// （club.registrations.manage），不随 GET /windows/overview 的无键口径。
+app.get('/windows/close/status', async (c) => {
+  await requireAdmin(c.env, c.req.raw, 'club.registrations.manage');
+  return c.json<WindowCloseStatus>(await loadWindowCloseStatus(c.env.DB));
+});
+
+// POST /api/admin/windows/close/notifications/retry —— 重投最近一次关窗的待发/失败通知
+//（outbox pending/failed 行；已 sent 的行不进投递查询、不重投，at-least-once 口径见 outbox 注）。
+// run 未完成（running/failed）时拒——post_close 投递语义未到，先走 POST /windows/close 续跑段；
+// 每次重投写审计 window_close_notify_retry 供对账（delivered/failed/skipped 落 after）。
+app.post('/windows/close/notifications/retry', async (c) => {
+  const user = await requireAdmin(c.env, c.req.raw, 'club.registrations.manage');
+  const run = await loadLatestCloseRun(c.env.DB);
+  if (run === null) throw new HttpError(404, '还没有关窗记录');
+  if (run.status !== 'completed') throw new HttpError(409, '最近一次关窗尚未完成，先重试关窗');
+  const result = await retryCloseNotifications(c.env, run.id);
+  await writeAudit(c.env.DB, {
+    actor: user.id,
+    action: 'window_close_notify_retry',
+    targetType: 'window_close_run',
+    targetId: run.id,
+    origin: 'user',
+    after: { delivered: result.delivered, failed: result.failed, skipped: result.skipped },
+  });
+  return c.json<WindowCloseNotifyRetryResult>(result);
+});
+
+// ---- 关窗状态装配（v6.88.1 B3，两个 close/status 路由共用） ----
+
+/** 最近一次关窗 run（id 降序——claim 批与窗口行同批建立 ⇒ id 序即窗序；status / retry 端点
+ *  同口径）。无任何 run 回 null。 */
+async function loadLatestCloseRun(db: D1Database): Promise<CloseRunRow | null> {
+  const row = await db.prepare('SELECT id FROM window_close_runs ORDER BY id DESC LIMIT 1').first<{ id: number }>();
+  return row ? loadCloseRun(db, row.id) : null;
+}
+
+/** run.summary_json 里拆 warnings（window-close-runs.ts parseSummaryWarnings 同款口径：坏 JSON /
+ *  非对象 / 缺键 / 非数组一律空数组，数组内只留字符串）——summaryJson 全文不外发（契约型注）。 */
+function parseRunWarnings(raw: string | null): string[] {
+  if (!raw) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  if (!isRecordObject(parsed)) return [];
+  const rawWarnings = parsed.warnings;
+  return Array.isArray(rawWarnings) ? rawWarnings.filter((w): w is string => typeof w === 'string') : [];
+}
+
+function isRecordObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** 关窗状态装配（GET /windows/close/status 的载荷）：run/window 恒同窗配对（WindowCloseStatus
+ *  型注）；steps 按 seq 升序投影 7 字段（runId/summaryJson 不进管理面）；通知计数按 status
+ *  分组（迁移 0097 注释预告的状态端点口径，CHECK 外异常值不计入）。 */
+async function loadWindowCloseStatus(db: D1Database): Promise<WindowCloseStatus> {
+  const run = await loadLatestCloseRun(db);
+  const WINDOW_COLUMNS = 'season, window_seq, status, is_temporary, opened_at, closed_at';
+  interface WindowDbRow {
+    season: number;
+    window_seq: number;
+    status: string;
+    is_temporary: number | null;
+    opened_at: string | null;
+    closed_at: string | null;
+  }
+  const win = run
+    ? await db
+        .prepare(`SELECT ${WINDOW_COLUMNS} FROM season_windows WHERE season = ? AND window_seq = ?`)
+        .bind(run.season, run.windowSeq)
+        .first<WindowDbRow>()
+    : await db
+        .prepare(`SELECT ${WINDOW_COLUMNS} FROM season_windows ORDER BY season DESC, window_seq DESC LIMIT 1`)
+        .first<WindowDbRow>();
+  const steps = run ? await loadCloseSteps(db, run.id) : [];
+  const notifications = { pending: 0, sent: 0, failed: 0 };
+  if (run) {
+    const counts = await db
+      .prepare('SELECT status, COUNT(*) AS n FROM window_close_notifications WHERE run_id = ? GROUP BY status')
+      .bind(run.id)
+      .all<{ status: string; n: number }>();
+    for (const row of counts.results) {
+      if (row.status === 'pending') notifications.pending = row.n;
+      else if (row.status === 'sent') notifications.sent = row.n;
+      else if (row.status === 'failed') notifications.failed = row.n;
+    }
+  }
+  return {
+    window: win
+      ? {
+          season: win.season,
+          windowSeq: win.window_seq,
+          status: win.status,
+          isTemporary: (win.is_temporary ?? 0) === 1,
+          openedAt: win.opened_at,
+          closedAt: win.closed_at,
+        }
+      : null,
+    run: run
+      ? {
+          id: run.id,
+          season: run.season,
+          windowSeq: run.windowSeq,
+          status: run.status,
+          currentStep: run.currentStep,
+          startedAt: run.startedAt,
+          updatedAt: run.updatedAt,
+          completedAt: run.completedAt,
+          error: run.error,
+          warnings: parseRunWarnings(run.summaryJson),
+        }
+      : null,
+    steps: steps.map((s) => ({
+      step: s.step,
+      seq: s.seq,
+      status: s.status,
+      attempt: s.attempt,
+      startedAt: s.startedAt,
+      finishedAt: s.finishedAt,
+      error: s.error,
+    })),
+    notifications,
+  };
+}
 
 // ---- 强制拍卖（规则 4.4.5，附录 A〔5〕；v6.51.0 起人选不限——前六仅作参考值） ----
 

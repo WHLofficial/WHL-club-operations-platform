@@ -529,7 +529,22 @@ describe('v6.88.0 B2 关窗流水线 · 七段批（T04–T05b）', () => {
     expect(sqlGet<{ status: string }>(fx.sqlite, "SELECT status FROM transfers WHERE idempotency_key = 't05b-nego'")).toMatchObject({ status: 'completed' });
     const transferLedger1 = transferLedgerCount();
     expect(transferLedger1?.n).toBeGreaterThan(0);
-    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM notifications WHERE template = 'promotion_forced'")).toMatchObject({ n: 1 });
+    // v6.88.1 B3：投递推迟到 post_close——payroll 段炸时通知只在 outbox（pending）、notifications 0 行；
+    // 通知在场的断言挪到下方 resume 成功后（post_close 从 outbox 投出，语义不丢）
+    const promoSessionId = sqlGet<{ id: number }>(
+      fx.sqlite,
+      "SELECT s.id AS id FROM negotiation_sessions s JOIN transfers t ON t.id = s.transfer_id WHERE t.type = 'promotion'",
+    )?.id;
+    expect(promoSessionId).not.toBeNull();
+    const promoOutboxRow = () =>
+      sqlGet<{ status: string; attempt: number; sent_at: string | null }>(
+        fx.sqlite,
+        'SELECT status, attempt, sent_at FROM window_close_notifications WHERE dedup_key = ?',
+        `promotion:${promoSessionId}`,
+      );
+    expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM window_close_notifications WHERE dedup_key = ?', `promotion:${promoSessionId}`)).toMatchObject({ n: 1 });
+    expect(promoOutboxRow()).toMatchObject({ status: 'pending', attempt: 0, sent_at: null });
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM notifications WHERE template = 'promotion_forced'")).toMatchObject({ n: 0 });
     expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'negotiation_settle'")).toMatchObject({ n: 2 });
     // close_all 批整体回滚：窗停 closing、窗内流水与审计零行、run failed + 租约已释放
     expect(winStatusOf(fx.sqlite)).toMatchObject({ status: 'closing', closed_at: null });
@@ -552,6 +567,8 @@ describe('v6.88.0 B2 关窗流水线 · 七段批（T04–T05b）', () => {
     expect(after).toMatchObject({ forceSettled: 1, promotionForceSettled: 1 });
     expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'negotiation_settle'")).toMatchObject({ n: 2 });
     expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM notifications WHERE template = 'promotion_forced'")).toMatchObject({ n: 1 });
+    // v6.88.1 B3：resume 的 post_close 从 outbox 投出通知——行终态 sent、attempt=1、不重复落行
+    expect(promoOutboxRow()).toMatchObject({ status: 'sent', attempt: 1, sent_at: expect.any(String) });
     expect(transferLedgerCount()).toEqual(transferLedger1); // 不双过户
     expect(winStatusOf(fx.sqlite)).toMatchObject({ status: 'closed' });
     expect(runRowOf(fx.sqlite)).toMatchObject({ status: 'completed' });

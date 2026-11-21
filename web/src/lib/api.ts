@@ -181,6 +181,7 @@ export type {
 // 均不重复转发；另有测试计划 §6.8 漏审补录六型（TournamentRow / BindTournamentResult /
 // ResultQueueRow / ConfirmedResultRow / ResultsQueue / ConfirmResultResult）随本批迁入。
 // v6.84.0 增补玩家队 → CPU 队反向转换五型（CpuDetachState 与三个动作回执），随 CPU 接管向导同批。
+// v6.88.1 B3 增补关窗通知 outbox 管理端四型（WindowCloseStatus 与 run/step 投影、通知重投回执）。
 export type {
   AdminClubRow,
   AdminEventDraft,
@@ -255,6 +256,10 @@ export type {
   ResultsQueue,
   StadiumAdmin,
   StadiumInfo,
+  WindowCloseNotifyRetryResult,
+  WindowCloseStatus,
+  WindowCloseStatusRun,
+  WindowCloseStatusStep,
   WindowOverviewRow,
   WindowRow,
   WindowsResponse,

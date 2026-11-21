@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router';
-import { api, apiPost, type AdminReviewBatchResult, type AdminReviewRow, type AdminReviews, type CloseWindowResult, type ForcedAuctionPreview, type ForcedAuctionResult, type MarketListings, type OpenWindowResult, type SeaAdminView, type SeaCancelResult, type SeaExtendResult, type SeaOpenSummary, type WindowOverviewRow, type WindowRow, type WindowsResponse } from '../../lib/api.ts';
+import { api, apiPost, type AdminReviewBatchResult, type AdminReviewRow, type AdminReviews, type CloseWindowResult, type ForcedAuctionPreview, type ForcedAuctionResult, type MarketListings, type OpenWindowResult, type SeaAdminView, type SeaCancelResult, type SeaExtendResult, type SeaOpenSummary, type WindowCloseNotifyRetryResult, type WindowCloseStatus, type WindowOverviewRow, type WindowRow, type WindowsResponse } from '../../lib/api.ts';
 import { TRANSFER_TYPE_LABEL } from '../../lib/ref.ts';
 import { playerPath } from '../../lib/player-link.ts';
 import { useToast } from '../../lib/toast.tsx';
@@ -821,7 +821,8 @@ function ForcedAuctionSection() {
 
 /* ---------- 转会窗口状态机（TECH_DESIGN §11/§6.4-6） ---------- */
 
-const WINDOW_STATUS_LABEL: Record<string, string> = { open: '进行中', closed: '已关闭' };
+// closing（v6.88.1 B3 补键）：关窗阶段机把窗口停在 closing 跑七段（run 失败待续跑也是 closing）
+const WINDOW_STATUS_LABEL: Record<string, string> = { open: '进行中', closing: '关窗中', closed: '已关闭' };
 
 // 窗类型（v3.0.0）：只有「临时」落库；季初 / 中期按同赛季非临时窗的 window_seq 升序派生
 function windowKindLabel(w: WindowRow, all: WindowRow[]): string {
@@ -847,6 +848,13 @@ function WindowsSection() {
   const { data, error: windowsError } = useQuery({
     queryKey: ['admin', 'windows'],
     queryFn: () => api<WindowsResponse>('/api/admin/windows'),
+  });
+
+  // 关窗进度（v6.88.1 B3）：键挂在 ['admin','windows'] 之下——reload() 的 invalidateQueries
+  // 走前缀匹配，关窗 / 重试通知后本查询一并刷新，不另写失效
+  const { data: closeStatus, error: closeStatusError } = useQuery({
+    queryKey: ['admin', 'windows', 'close-status'],
+    queryFn: () => api<WindowCloseStatus>('/api/admin/windows/close/status'),
   });
 
   useEffect(() => {
@@ -954,6 +962,12 @@ function WindowsSection() {
         />
       </div>
 
+      {closeStatusError ? (
+        <p className="bad-text">关窗进度读取失败：{closeStatusError instanceof Error ? closeStatusError.message : '稍后再试'}</p>
+      ) : (
+        <CloseStatusPanel status={closeStatus} busy={busy} onRetryClose={() => closeWindow(false)} />
+      )}
+
       {data === undefined ? (
         <p className="muted">正在翻窗口台账…</p>
       ) : data.windows.length === 0 ? (
@@ -978,7 +992,9 @@ function WindowsSection() {
                   <td className="num mono">{w.windowSeq}</td>
                   <td>{windowKindLabel(w, data.windows)}</td>
                   <td>
-                    <span className={`badge ${w.status === 'open' ? 'sky' : 'gray'}`}>{WINDOW_STATUS_LABEL[w.status] ?? w.status}</span>
+                    <span className={`badge ${w.status === 'open' ? 'sky' : w.status === 'closing' ? 'orange' : 'gray'}`}>
+                      {WINDOW_STATUS_LABEL[w.status] ?? w.status}
+                    </span>
                   </td>
                   <td className="mono">{dateTime(w.openedAt)}</td>
                   <td className="mono">{dateTime(w.closedAt)}</td>
@@ -989,6 +1005,142 @@ function WindowsSection() {
         </div>
       )}
     </section>
+  );
+}
+
+
+/* ---------- 关窗进度面板（v6.88.1 B3）：最近一次关窗 run 的七段进度 / warnings / 通知投递 ---------- */
+
+const CLOSE_STEP_LABEL: Record<string, string> = {
+  preflight: '前置结算',
+  payroll: '工资批',
+  home: '主场结算',
+  loyalty: '忠诚支出',
+  squad_audit: '阵容体检',
+  finalize: '落窗收口',
+  post_close: '窗尾收口',
+};
+
+const CLOSE_RUN_STATUS_LABEL: Record<string, string> = { running: '进行中', failed: '失败', completed: '已完成' };
+
+const CLOSE_STEP_STATUS_LABEL: Record<string, string> = { pending: '待执行', done: '已完成', failed: '失败' };
+
+/** 段 / 通知状态 → badge 配色（只用既有 sky/gray/red——ok/bad 无 CSS 规则，styles.css 已盘点） */
+function closeStepBadgeClass(status: string): string {
+  if (status === 'failed') return 'red';
+  return status === 'pending' ? 'gray' : 'sky';
+}
+
+/** 管理端关窗进度面板：消费 GET /api/admin/windows/close/status（形状锁在契约 WindowCloseStatus）。
+ *  「重试关窗」复用父级 closeWindow(false)——run 未完成（failed/running，窗口停在 closing）时
+ *  走 resume 只前进；「重试通知」打 POST /api/admin/windows/close/notifications/retry 后 invalidate
+ *  刷新，出现条件 = run 已完成且有 pending/failed 通知（评审口径：进程崩在 post_close 中途时
+ *  step 可能停 pending，不能拿 step 状态当按钮条件）。 */
+function CloseStatusPanel(props: { status: WindowCloseStatus | undefined; busy: boolean; onRetryClose: () => void }) {
+  const { status, busy, onRetryClose } = props;
+  const { show } = useToast();
+  const { dateTime } = useTimeFmt();
+  const queryClient = useQueryClient();
+  const [retryBusy, setRetryBusy] = useState(false);
+
+  async function retryNotify() {
+    if (retryBusy) return;
+    setRetryBusy(true);
+    try {
+      const res = await apiPost<WindowCloseNotifyRetryResult>('/api/admin/windows/close/notifications/retry', {});
+      show(
+        `关窗通知重投完成：成功 ${res.delivered} 条、失败 ${res.failed} 条。` +
+          (res.failed > 0 ? '失败原因见通知行，可再次重试。' : ''),
+      );
+      queryClient.invalidateQueries({ queryKey: ['admin', 'windows'] });
+    } catch (err) {
+      show(err instanceof Error ? err.message : '关窗通知重投失败', true);
+    } finally {
+      setRetryBusy(false);
+    }
+  }
+
+  // 状态未到 / 全库无窗口行：面板不占位（窗口列表自身的加载态与空态已覆盖这两种情形）
+  if (status === undefined || status.window === null) return null;
+  const { window: win, run, steps, notifications } = status;
+  const canRetryClose = run !== null && run.status !== 'completed';
+  const canRetryNotify = run !== null && run.status === 'completed' && (notifications.failed > 0 || notifications.pending > 0);
+  return (
+    <div>
+      <p className="hint">
+        最近一次关窗：第 {win.season} 赛季 · 窗口 {win.windowSeq}（
+        <span className={`badge ${win.status === 'open' ? 'sky' : win.status === 'closing' ? 'orange' : 'gray'}`}>
+          {WINDOW_STATUS_LABEL[win.status] ?? win.status}
+        </span>
+        ）
+        {run === null
+          ? '——还没有关窗记录。'
+          : `——${CLOSE_RUN_STATUS_LABEL[run.status] ?? run.status}，当前段「${CLOSE_STEP_LABEL[run.currentStep] ?? run.currentStep}」。`}
+      </p>
+      {run !== null && run.warnings.length > 0 && (
+        <div className="banner warn">
+          {run.warnings.map((w, i) => (
+            <p key={`${i}-${w}`}>{w}</p>
+          ))}
+        </div>
+      )}
+      {run !== null && (
+        <>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th className="num">序</th>
+                  <th>段</th>
+                  <th>状态</th>
+                  <th className="num">尝试</th>
+                  <th>开始</th>
+                  <th>结束</th>
+                  <th>错误</th>
+                </tr>
+              </thead>
+              <tbody>
+                {steps.map((s) => (
+                  <tr key={s.step}>
+                    <td className="num mono">{s.seq}</td>
+                    <td>{CLOSE_STEP_LABEL[s.step] ?? s.step}</td>
+                    <td>
+                      <span className={`badge ${closeStepBadgeClass(s.status)}`}>{CLOSE_STEP_STATUS_LABEL[s.status] ?? s.status}</span>
+                    </td>
+                    <td className="num mono">{s.attempt}</td>
+                    <td className="mono">{dateTime(s.startedAt)}</td>
+                    <td className="mono">{dateTime(s.finishedAt)}</td>
+                    <td className="bad-text">{s.error ?? ''}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="hint">
+            关窗通知（站内信 / QQ 投递为至少一次语义）：待发 {notifications.pending} · 已发 {notifications.sent} · 失败{' '}
+            {notifications.failed > 0 ? <span className="bad-text">{notifications.failed}</span> : 0}
+          </p>
+          {(canRetryClose || canRetryNotify) && (
+            <div className="inline-form">
+              {canRetryClose && (
+                <ConfirmButton
+                  label="重试关窗"
+                  confirmLabel="再点一次确认续跑关窗"
+                  busyLabel="处理中…"
+                  busy={busy}
+                  onConfirm={onRetryClose}
+                />
+              )}
+              {canRetryNotify && (
+                <button className="btn" type="button" disabled={retryBusy} onClick={retryNotify}>
+                  {retryBusy ? '重投中…' : '重试通知'}
+                </button>
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </div>
   );
 }
 

@@ -21,14 +21,21 @@ import type { PayrollSummary } from './window-payroll.ts';
 import { loyaltyMovements } from './season-settle.ts';
 import { growthPeriodStatements } from './growth.ts';
 import { windowHomeStatements } from './home.ts';
-import type { HomeWindowSummary } from './home.ts';
+import type { HomeWindowSummary, PendingClubNotification } from './home.ts';
 import { queueClubNotification } from './notify.ts';
 import { SQUAD_RULE_LABEL, squadAuditStatements } from './squad-audit.ts';
+import type { SquadAuditRow } from './squad-audit.ts';
 import { openSealedBatchOnWindowClose } from './sea-sealed.ts';
 import { triggerDemandBatch } from './demand-ops.ts';
 import { ACTIVE_SESSION_SQL } from './negotiation-guard.ts';
 import { sqlDisplayName } from '../core/player-name.ts';
 import { slotsForCapacity } from '../core/venue.ts';
+// 关窗通知 outbox（v6.88.1 B3）：三类关窗通知段内落库语句构造 + post_close / 管理端重试统一投递
+import {
+  deliverCloseNotifications,
+  stageCloseNotificationStatements,
+  type CloseNotificationItem,
+} from './window-close-outbox.ts';
 // 关窗持久化阶段机（v6.88.0 B2 七段接线）：认领 / 租约 / 七段 step 原语 + closing 行读取
 import {
   acquireCloseLease,
@@ -535,6 +542,56 @@ function requireLoyaltySummary(steps: CloseStepRow[]): { count: number; total: n
 }
 
 /**
+ * home 段批后通知 → outbox 行（v6.88.1 B3）：dedup_key = home:{clubId}:{template}:{序号}，
+ * 序号按 (clubId, template) 组合在数组内的出现次序 0 起计——现状每队每模板至多一条（恒 0），
+ * 位次是防御性消歧（naming_offer_activated 同队可多条：同键序号不同 → 两行都在，
+ * 同键同序号重放 → INSERT OR IGNORE 吞，不撞 (run_id, dedup_key) 复合主键）。
+ */
+function homeNotificationItems(notifications: readonly PendingClubNotification[]): CloseNotificationItem[] {
+  const seen = new Map<string, number>();
+  return notifications.map((n) => {
+    const group = `${n.clubId}:${n.template}`;
+    const ordinal = seen.get(group) ?? 0;
+    seen.set(group, ordinal + 1);
+    return {
+      clubId: n.clubId,
+      template: n.template,
+      dedupKey: `home:${n.clubId}:${n.template}:${ordinal}`,
+      data: n.data,
+    };
+  });
+}
+
+/**
+ * 体检未通过通知 → outbox 行（v6.88.1 B3；v6.69.0 D10 文案与数据键自 post_close 原样搬移——
+ * 只给金额与规则名、不点球员姓名，球员页才是明细入口）。payload 落 data 原文（含
+ * season/windowSeq，修复原 notifications LIKE 查重恒不命中），dedup_key = squad:{clubId}
+ * （一队一体检一封），CPU 队与通过队不发。
+ */
+function squadAuditNotificationItems(
+  audits: readonly SquadAuditRow[],
+  season: number,
+  windowSeq: number,
+): CloseNotificationItem[] {
+  const items: CloseNotificationItem[] = [];
+  for (const a of audits) {
+    if (a.isCpu || a.pass) continue;
+    const rules = [...new Set(a.issues.map((i) => SQUAD_RULE_LABEL[i.rule] ?? i.rule))].join('、');
+    const text =
+      `⚠️ S${season} 第 ${windowSeq} 窗关窗体检：阵容不通过（涉及规则：${rules || '无'}）。` +
+      (a.overspend > 0 ? `工资 ${a.wageAfter.toFixed(2)}m，超出帽值 ${a.overspend.toFixed(2)}m。` : `工资 ${a.wageAfter.toFixed(2)}m。`) +
+      `本次不处置，下窗关闭前请按教练页红字清单调整。`;
+    items.push({
+      clubId: a.clubId,
+      template: 'squad_audit_failed',
+      dedupKey: `squad:${a.clubId}`,
+      data: { text, season, windowSeq, overspend: a.overspend, rules },
+    });
+  }
+  return items;
+}
+
+/**
  * 关窗（v6.88.0 B2 七段持久化阶段机）：全部业务校验在 claim 之前的 open 状态下完成（失败直接 409，
  * 不进入 closing——防死锁，claim 后教练写被冻结闸挡住）→ claim（open→closing + INSERT run + INSERT
  * 7 行 step 小批，只认领不做业务）→ acquire 租约 → 复核窗口/租约 → 读 steps 按 seq 找第一个未
@@ -547,10 +604,12 @@ function requireLoyaltySummary(steps: CloseStepRow[]): { count: number; total: n
  *                  批内任何报错整段回滚并 markCloseStepFailed（run failed、窗口留 closing、后段仍
  *                  pending、已提交前段不回滚）；
  *   6 finalize     closing→closed + 审计 + finalize done + run completed + summary_json 同批原子；
- *   7 post_close   squad/home 通知 + 窗尾收口结算 + 海捞开标——finalize 成功即关窗成功（已裁决），
- *                  本段失败只把 step 标 failed + warnings 追加进 run.summary_json，不把 run 改回
- *                  failed、不改成功响应（通知 at-least-once：崩在已发未标之间允许重复一条；
- *                  通知 outbox 是 B3）。
+ *   7 post_close   三类关窗通知统一投递（preflight/home/squad_audit 段已随各自收口批落库
+ *                  outbox：promotion:{sessionId} / home:{clubId}:{template}:{序号} /
+ *                  squad:{clubId}，本段按 run 捞 pending/failed 严格投递）+ 窗尾收口结算 +
+ *                  海捞开标——finalize 成功即关窗成功（已裁决），本段失败只把 step 标 failed +
+ *                  warnings 追加进 run.summary_json，不把 run 改回 failed、不改成功响应
+ *                  （通知 at-least-once：崩在已发未标之间允许重复一条；v6.88.1 B3 起 outbox）。
  *
  * resume：completed run 直接回放既有摘要；running/failed 继续推进——done 段跳过（已提交不回滚、
  * 已 done 段不重跑），pending/failed 从最小 seq 继续。resume 跳过段的汇总输入从 step.summary_json
@@ -646,7 +705,10 @@ export async function closeWindow(
       await settleOverdue(env, { actor, origin: 'user', season: win.season, windowSeq: win.window_seq });
 
       // 2) promotion 强约（v6.64.4）：会话**无条件**按 E 快照成约（F 定死 ⇒ E 恒在），
-      //    不走 force 配置口径、也不挡关窗（用户裁决「窗关强约成约」）
+      //    不走 force 配置口径、也不挡关窗（用户裁决「窗关强约成约」）。
+      //    v6.88.1 B3：通知不直发——攒成 outbox 行随下方 preflight 收口批原子落库
+      //    （崩溃/段批回滚与 step 记账同进退），post_close 统一投递；
+      //    dedup_key = promotion:{sessionId}（段级重放 / 重复 close 不重复落行）
       const promoSessions = await db
         .prepare(
           `SELECT s.id, s.club_id, ${sqlDisplayName('p')} AS player_name
@@ -656,10 +718,16 @@ export async function closeWindow(
            WHERE ${ACTIVE_SESSION_SQL} AND t.type = 'promotion' ORDER BY s.id LIMIT 200`,
         )
         .all<{ id: number; club_id: number; player_name: string }>();
+      const promoNotices: CloseNotificationItem[] = [];
       for (const s of promoSessions.results) {
         if (await forceSettleAtExpected(env, s.id, actor)) {
           promotionForceSettled++;
-          await queueClubNotification(env, s.club_id, 'promotion_forced', { player: s.player_name });
+          promoNotices.push({
+            clubId: s.club_id,
+            template: 'promotion_forced',
+            dedupKey: `promotion:${s.id}`,
+            data: { player: s.player_name },
+          });
         }
       }
 
@@ -677,8 +745,10 @@ export async function closeWindow(
       }
 
       // 标 preflight done：强约计数落 step 自己的 summary_json（resume 收口回读用），同批把
-      // current_step 推进到 payroll——段收口小批原子
+      // current_step 推进到 payroll——段收口小批原子。v6.88.1 B3：本批强约产生的通知
+      // （promoNotices）以 INSERT OR IGNORE 随同批原子落库 outbox，批回滚则行不落
       await db.batch([
+        ...stageCloseNotificationStatements(db, run.id, promoNotices),
         ...completeCloseStep(db, run.id, CLOSE_STEP_PREFLIGHT, { forceSettled, promotionForceSettled }),
         setCloseCurrentStep(db, run.id, CLOSE_STEP_PAYROLL),
       ]);
@@ -737,8 +807,12 @@ export async function closeWindow(
     }
     if (home !== null) {
       currentStep = CLOSE_STEP_HOME;
+      // v6.88.1 B3：home.notifications（情绪变化 / 品牌解约 / 招商轮四模板）不再留到 post_close
+      // 直发——随本段批 INSERT OR IGNORE 原子落库 outbox（dedup_key = home:{clubId}:{template}:{序号}），
+      // 崩在 home done 与 post_close 之间行已持久，resume 投递不丢
       await db.batch([
         ...home.statements,
+        ...stageCloseNotificationStatements(db, run.id, homeNotificationItems(home.notifications)),
         ...completeCloseStep(db, run.id, CLOSE_STEP_HOME, home.summary),
         setCloseCurrentStep(db, run.id, CLOSE_STEP_LOYALTY),
       ]);
@@ -752,11 +826,15 @@ export async function closeWindow(
       ]);
     }
     // squad_audit 段：临时窗无业务语句也要标 done（施工表明文），提交闸按段 done 判而非按
-    // builder 产物判——临时窗 squadAudit 为 null（无存档语义）仍要走 step 记账批
+    // builder 产物判——临时窗 squadAudit 为 null（无存档语义）仍要走 step 记账批。
+    // v6.88.1 B3：体检未通过通知（文案/数据键自 post_close 原样搬移）随本段批原子落库
+    // outbox（dedup_key = squad:{clubId}，CPU 队与通过队无行），post_close 统一投递
     if (!stepDone(steps, CLOSE_STEP_SQUAD_AUDIT)) {
       currentStep = CLOSE_STEP_SQUAD_AUDIT;
+      const squadNotices = squadAudit === null ? [] : squadAuditNotificationItems(squadAudit.audits, win.season, win.window_seq);
       await db.batch([
         ...(squadAudit?.statements ?? []),
+        ...stageCloseNotificationStatements(db, run.id, squadNotices),
         ...completeCloseStep(db, run.id, CLOSE_STEP_SQUAD_AUDIT),
         setCloseCurrentStep(db, run.id, CLOSE_STEP_FINALIZE),
       ]);
@@ -819,55 +897,26 @@ export async function closeWindow(
 
     // —— 段 7 post_close（后置动作段）：finalize 成功即关窗成功、run 已 completed（已裁决）——
     //     本段任何失败只把 step 标 failed + warnings 追加进 run.summary_json，不把 run 改回 failed、
-    //     不改成功响应；通知 at-least-once（崩在已发未标之间允许重复一条，B2 不做 outbox，B3 收口）。
-    //     resume 跳过段的产出一律跳过：上一尝试的 audits/notifications 未持久化，数据不可得
-    //     （B4 恢复范围，本批登记在案）。 ——
+    //     不改成功响应；通知 at-least-once（崩在「notifications 双通道行已写、outbox 行未标 sent」
+    //     之间重投会重复一条，v6.88.1 B3 起 outbox 承载，不谎称 exactly-once）。
+    //     resume 不再丢通知：三类通知已随各自段批持久化在 outbox，本段按 run_id 捞 pending/failed
+    //     行投递，与本调用重建了哪些段无关。 ——
     currentStep = CLOSE_STEP_POST_CLOSE;
     const warnings: string[] = [];
     const warn = (label: string, err: unknown) =>
       warnings.push(`${label}：${err instanceof Error ? err.message : String(err)}`);
 
     if (ranPostClose) {
-      // 核验不通过通知（v6.69.0 D10）：批成败之后才发，按 (season, window_seq, club) 去重；
-      // 只给金额与规则名，不点球员姓名（球员页才是明细入口）。
-      if (squadAudit !== null) {
-        try {
-          for (const a of squadAudit.audits) {
-            if (a.isCpu || a.pass) continue;
-            const dup = await db
-              .prepare(
-                `SELECT 1 AS n FROM notifications WHERE club_id = ? AND template = 'squad_audit_failed'
-                 AND payload LIKE ? LIMIT 1`,
-              )
-              .bind(a.clubId, `%"season":${win.season},"windowSeq":${win.window_seq}%`)
-              .first<{ n: number }>();
-            if (dup) continue;
-            const rules = [...new Set(a.issues.map((i) => SQUAD_RULE_LABEL[i.rule] ?? i.rule))].join('、');
-            const text =
-              `⚠️ S${win.season} 第 ${win.window_seq} 窗关窗体检：阵容不通过（涉及规则：${rules || '无'}）。` +
-              (a.overspend > 0 ? `工资 ${a.wageAfter.toFixed(2)}m，超出帽值 ${a.overspend.toFixed(2)}m。` : `工资 ${a.wageAfter.toFixed(2)}m。`) +
-              `本次不处置，下窗关闭前请按教练页红字清单调整。`;
-            await queueClubNotification(env, a.clubId, 'squad_audit_failed', {
-              text,
-              season: win.season,
-              windowSeq: win.window_seq,
-              overspend: a.overspend,
-              rules,
-            });
-          }
-        } catch (err) {
-          warn('体检未通过通知发送失败', err);
+      // 三类关窗通知统一投递（v6.88.1 B3）：preflight/home/squad_audit 段已随各自收口批把通知
+      // 落库 outbox（与段批同批原子），这里按 run 捞 pending/failed 严格投递——已 sent 不重投。
+      // 失败只计不抛：failed>0 记 warning（段收口时 step 标 failed、run 保持 completed），管理端可重投
+      try {
+        const delivered = await deliverCloseNotifications(env, run.id);
+        if (delivered.failed > 0) {
+          warnings.push(`关窗通知投递失败 ${delivered.failed} 条（已投 ${delivered.delivered} 条），可在管理端重试`);
         }
-      }
-      // 情绪变化 / 品牌解约通知（v6.13.0 C2）：批提交成功后才排队——批回滚不发假通知
-      if (home !== null) {
-        try {
-          for (const n of home.notifications) {
-            await queueClubNotification(env, n.clubId, n.template, n.data);
-          }
-        } catch (err) {
-          warn('关窗通知发送失败', err);
-        }
+      } catch (err) {
+        warn('关窗通知投递失败', err);
       }
       // 窗尾收口（4.4.7）：无人出价下架收费、仍在竞价的强制进待审——此刻窗口已落 closed，
       // 窗口归属单据的 window_status 才会读到 closed（旧实现同口径：收口在批后跑结算）。

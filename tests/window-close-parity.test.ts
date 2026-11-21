@@ -5,12 +5,14 @@
 // （金额、流水顺序、balance_after、通知内容、审计顺序）都会在这里变红。
 //
 // 断言分两层，更新协议不同：
-//   · 业务层（金样主体，B2 不得改动）：ledger_accounts / ledger_entries / contracts /
+//   · 业务层（金样主体，不得改动）：ledger_accounts / ledger_entries / contracts /
 //     notifications / audit_log / registrations / squad_audits / naming_contracts / stadiums /
-//     market_rounds / season_windows 的确定性列 + 关窗摘要（CloseWindowResult）。
-//   · 形态层（B1 现状，B2 计划内变更）：window_close_runs / window_close_steps 的行形状
-//     （B1 = 单 step close_all、seq 1）。B2 拆 7 步后【有意】更新这两张表的期望
-//     （7 个 step 的 seq/名称/初始 pending），属计划内变更不算漂移；更新时业务层断言必须原样保留。
+//     market_rounds / season_windows / window_close_notifications 的确定性列 + 关窗摘要
+//     （CloseWindowResult）。
+//   · 结构层（期望不进金样）：window_close_runs / window_close_steps 的行形状由 expectB2Structure
+//     断言（run completed + current_step='post_close' + 7 段全 done）；v6.88.1 B3 起金样不再携带
+//     这两张表的 B1 死数据（runs/steps 从未参与比对），outbox 行集改由 expectB2Structure 第二参
+//     逐局锁死，closeNotifications 的确定性列照常走业务层比对。更新时业务层断言必须原样保留。
 //
 // 确定性口径：凡 NOW_SQL / crypto.randomUUID / 运行时钟产物（closed_at、started_at、updated_at、
 // completed_at、finished_at、created_at、lease_owner、signed_at、effective_from）不进逐字断言，
@@ -328,6 +330,18 @@ interface RoundRow {
   opened_window: number;
   status: string;
 }
+// v6.88.1 B3：outbox 行快照（窗口关闭通知表）。created_at / sent_at 是 NOW_SQL 产物，不进逐字
+// 断言（expectVolatileColumns 钉非空）；其余列全确定。
+interface CloseNotificationRow {
+  run_id: number;
+  club_id: number;
+  template: string;
+  payload: string;
+  dedup_key: string;
+  status: string;
+  attempt: number;
+  last_error: string | null;
+}
 
 interface ParitySnapshot {
   windows: WindowRow[];
@@ -343,6 +357,7 @@ interface ParitySnapshot {
   naming: NamingRow[];
   stadiums: StadiumRow[];
   rounds: RoundRow[];
+  closeNotifications: CloseNotificationRow[];
 }
 
 function takeSnapshot(sqlite: DatabaseSync): ParitySnapshot {
@@ -358,6 +373,12 @@ function takeSnapshot(sqlite: DatabaseSync): ParitySnapshot {
     steps: sqlAll<StepRow>(
       sqlite,
       'SELECT run_id, step, seq, status, attempt, error FROM window_close_steps ORDER BY run_id, seq',
+    ),
+    closeNotifications: sqlAll<CloseNotificationRow>(
+      sqlite,
+      // v6.88.1 B3：outbox 表由 closeWindow 各段收口批落库（业务层，快照时点 = closeWindow 返回后、行已终态）
+      `SELECT run_id, club_id, template, payload, dedup_key, status, attempt, last_error
+       FROM window_close_notifications ORDER BY dedup_key`,
     ),
     accounts: sqlAll<AccountRow>(sqlite, 'SELECT club_id, balance FROM ledger_accounts ORDER BY club_id'),
     entries: sqlAll<EntryRow>(
@@ -440,6 +461,15 @@ function expectVolatileColumns(sqlite: DatabaseSync, season: number, windowSeq: 
   for (const s of steps) {
     expect(s.finished_at, `step(${s.status}) finished_at 已落`).not.toBeNull();
   }
+  // v6.88.1 B3：outbox 行的 created_at（落库时刻）与 sent_at（投递时刻）都是 NOW_SQL 产物——只钉非空
+  const closeNotifications = sqlAll<{ dedup_key: string; created_at: string | null; sent_at: string | null }>(
+    sqlite,
+    'SELECT dedup_key, created_at, sent_at FROM window_close_notifications',
+  );
+  for (const n of closeNotifications) {
+    expect(n.created_at, `outbox(${n.dedup_key}) created_at 已落`).not.toBeNull();
+    expect(n.sent_at, `outbox(${n.dedup_key}) sent_at 已落`).not.toBeNull();
+  }
 }
 
 function countOf(sqlite: DatabaseSync, table: string): number {
@@ -449,7 +479,9 @@ function countOf(sqlite: DatabaseSync, table: string): number {
 // ---------- 金样（B1 基线逐字快照） ----------
 
 interface GoldSet {
-  snap: ParitySnapshot;
+  // v6.88.1 B3：runs/steps 从金样删除（B1 单 step 死数据从未参与比对——runs/steps 的结构
+  // 由 expectB2Structure 断言、outbox 行集改由它的第二参逐局锁死，见该函数注）
+  snap: Omit<ParitySnapshot, 'runs' | 'steps'>;
   summary: Record<string, unknown>;
 }
 
@@ -557,18 +589,20 @@ const GOLD: Record<GoldMode, GoldSet> = {
     summary: GOLD_REGULAR_SUMMARY,
     snap: {
       windows: [{ season: 1, window_seq: 1, status: 'closed', is_temporary: 0, opened_at: '2026-07-01T00:00:00Z' }],
-      runs: [
+      // v6.88.1 B3 outbox：常规局恰 1 行——promotion 强约随 preflight 收口批落库、post_close 投出
+      //（dedup_key 的 sessionId = parity-nego 会话之后的上调会话；payload 落 data 原文）
+      closeNotifications: [
         {
-          id: 1,
-          season: 1,
-          window_seq: 1,
-          status: 'completed',
-          current_step: 'close_all',
-          error: null,
-          summary_json: JSON.stringify(GOLD_REGULAR_SUMMARY),
+          run_id: 1,
+          club_id: 9001,
+          template: 'promotion_forced',
+          payload: '{"player":"甲青训"}',
+          dedup_key: 'promotion:2',
+          status: 'sent',
+          attempt: 1,
+          last_error: null,
         },
       ],
-      steps: [{ run_id: 1, step: 'close_all', seq: 1, status: 'done', attempt: 1, error: null }],
       accounts: [
         { club_id: 9001, balance: 86.71 },
         { club_id: 9002, balance: 107 },
@@ -651,18 +685,8 @@ const GOLD: Record<GoldMode, GoldSet> = {
         { season: 1, window_seq: 1, status: 'closed', is_temporary: 0, opened_at: '2026-07-01T00:00:00Z' },
         { season: 1, window_seq: 2, status: 'closed', is_temporary: 1, opened_at: '2026-07-15T00:00:00Z' },
       ],
-      runs: [
-        {
-          id: 1,
-          season: 1,
-          window_seq: 2,
-          status: 'completed',
-          current_step: 'close_all',
-          error: null,
-          summary_json: JSON.stringify(GOLD_TEMP_SUMMARY),
-        },
-      ],
-      steps: [{ run_id: 1, step: 'close_all', seq: 1, status: 'done', attempt: 1, error: null }],
+      // v6.88.1 B3 outbox：临时窗无 squad_audit 段 outbox（不推进存档）、chargeNaming=false 无 naming
+      closeNotifications: [],
       accounts: [
         { club_id: 9001, balance: 98 },
         { club_id: 9002, balance: 98 },
@@ -721,18 +745,8 @@ const GOLD: Record<GoldMode, GoldSet> = {
         { season: 1, window_seq: 1, status: 'closed', is_temporary: 0, opened_at: '2026-07-01T00:00:00Z' },
         { season: 1, window_seq: 2, status: 'closed', is_temporary: 0, opened_at: '2026-07-15T00:00:00Z' },
       ],
-      runs: [
-        {
-          id: 1,
-          season: 1,
-          window_seq: 2,
-          status: 'completed',
-          current_step: 'close_all',
-          error: null,
-          summary_json: JSON.stringify(GOLD_MID_SUMMARY),
-        },
-      ],
-      steps: [{ run_id: 1, step: 'close_all', seq: 1, status: 'done', attempt: 1, error: null }],
+      // v6.88.1 B3 outbox：无冠名、无 promotion/谈判强约、两队体检全过 ⇒ outbox 零行
+      closeNotifications: [],
       accounts: [
         { club_id: 9001, balance: 95 },
         { club_id: 9002, balance: 95.6 },
@@ -804,12 +818,15 @@ function expectGold(received: unknown, gold: unknown, label: string): void {
 
 const B2_STEPS = ['preflight', 'payroll', 'home', 'loyalty', 'squad_audit', 'finalize', 'post_close'];
 
-/** 结构层断言：B2 有意把 B1 的单 step close_all 拆成 7 段，不能拿 B1 结构当 parity 金样 */
-function expectB2Structure(snap: ParitySnapshot): void {
+/** 结构层断言：B2 有意把 B1 的单 step close_all 拆成 7 段，不能拿 B1 结构当 parity 金样。
+ *  v6.88.1 B3：第二参逐局锁 outbox 行集（regular 1 行 promotion_forced / temp、mid 零行），
+ *  金样快照里的 closeNotifications 列由 expectGold 的业务层比对照常锁。 */
+function expectB2Structure(snap: ParitySnapshot, closeNotifications: CloseNotificationRow[]): void {
   expect(snap.runs, 'run completed').toMatchObject([{ status: 'completed', current_step: 'post_close', error: null }]);
   expect(snap.steps.map((s) => s.step), '7 段 step').toEqual(B2_STEPS);
   expect(snap.steps.map((s) => s.seq), 'step seq 1-7').toEqual([1, 2, 3, 4, 5, 6, 7]);
   expect(snap.steps.every((s) => s.status === 'done' && s.attempt === 1 && s.error === null), '7 段全 done').toBe(true);
+  expect(snap.closeNotifications, 'outbox 行集（v6.88.1 B3）').toEqual(closeNotifications);
 }
 
 /** 共同尾断言：完成态语义 + completed 后重放 409 且零新行 */
@@ -838,10 +855,11 @@ describe('v6.88.0 closeWindow parity 金样（B1 基线）', () => {
     // 响应与 summary_json 同源（completed 重放靠它，回执必须逐字段一致）
     const stored: Record<string, unknown> = JSON.parse(snap.runs[0]?.summary_json ?? 'null');
     expect(result).toEqual(stored);
-    expectB2Structure(snap);
+    expectB2Structure(snap, gold.snap.closeNotifications);
     expectGold(result, gold.summary, 'regular.summary');
     expectGold(snap.windows, gold.snap.windows, 'regular.windows');
-    // runs/steps 结构由 expectB2Structure 断言；金样只锁业务表（B1 的结构不是 parity 对象）
+    // runs/steps 结构由 expectB2Structure 断言（B3 起金样不再携带 B1 死数据）；outbox 行集也由其第二参逐局锁
+    expectGold(snap.closeNotifications, gold.snap.closeNotifications, 'regular.closeNotifications');
     expectGold(snap.accounts, gold.snap.accounts, 'regular.accounts');
     expectGold(snap.entries, gold.snap.entries, 'regular.entries');
     expectGold(snap.contracts, gold.snap.contracts, 'regular.contracts');
@@ -862,10 +880,11 @@ describe('v6.88.0 closeWindow parity 金样（B1 基线）', () => {
     const gold = GOLD.temp;
     const stored: Record<string, unknown> = JSON.parse(snap.runs[0]?.summary_json ?? 'null');
     expect(result).toEqual(stored);
-    expectB2Structure(snap);
+    expectB2Structure(snap, gold.snap.closeNotifications);
     expectGold(result, gold.summary, 'temp.summary');
     expectGold(snap.windows, gold.snap.windows, 'temp.windows');
-    // runs/steps 结构由 expectB2Structure 断言；金样只锁业务表（B1 的结构不是 parity 对象）
+    // runs/steps 结构由 expectB2Structure 断言（B3 起金样不再携带 B1 死数据）；outbox 行集也由其第二参逐局锁
+    expectGold(snap.closeNotifications, gold.snap.closeNotifications, 'temp.closeNotifications');
     expectGold(snap.accounts, gold.snap.accounts, 'temp.accounts');
     expectGold(snap.entries, gold.snap.entries, 'temp.entries');
     expectGold(snap.contracts, gold.snap.contracts, 'temp.contracts');
@@ -886,10 +905,11 @@ describe('v6.88.0 closeWindow parity 金样（B1 基线）', () => {
     const gold = GOLD.mid;
     const stored: Record<string, unknown> = JSON.parse(snap.runs[0]?.summary_json ?? 'null');
     expect(result).toEqual(stored);
-    expectB2Structure(snap);
+    expectB2Structure(snap, gold.snap.closeNotifications);
     expectGold(result, gold.summary, 'mid.summary');
     expectGold(snap.windows, gold.snap.windows, 'mid.windows');
-    // runs/steps 结构由 expectB2Structure 断言；金样只锁业务表（B1 的结构不是 parity 对象）
+    // runs/steps 结构由 expectB2Structure 断言（B3 起金样不再携带 B1 死数据）；outbox 行集也由其第二参逐局锁
+    expectGold(snap.closeNotifications, gold.snap.closeNotifications, 'mid.closeNotifications');
     expectGold(snap.accounts, gold.snap.accounts, 'mid.accounts');
     expectGold(snap.entries, gold.snap.entries, 'mid.entries');
     expectGold(snap.contracts, gold.snap.contracts, 'mid.contracts');
