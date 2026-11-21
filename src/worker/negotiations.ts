@@ -665,13 +665,23 @@ async function settleActiveSession(
   return {};
 }
 
+// 强约三态（v6.88.1 B3 评审修复，原返回 boolean）：
+//   · settled-now    = 本调用刚按 E 强约成约（会话 active 且 E 非 null）；
+//   · already-forced = 会话已是 settle_source='forced' 的成约态——上一轮尝试批外结掉、收口批回滚
+//     的 resume 场景，或并发对手抢先强约。调用方（关窗 preflight）据此**照常攒通知**：
+//     dedup_key promotion:{sessionId} + INSERT OR IGNORE 天然幂等，重复落行不重复投；
+//   · skipped        = 无需动作（会话非 active 且非 forced 成约 / E 为 null——「没提交过新 RC
+//     （E 为 null）的会话由调用方挡下关窗」的原语义不变）。
+export type ForceSettleOutcome = 'settled-now' | 'already-forced' | 'skipped';
+
 // 窗口推进强制结算（§6.4-6）：把活跃会话按 E 快照强约成约（成约即过户）。
-// 没提交过新 RC（E 为 null）的会话返回 false，由调用方挡下关窗。
-export async function forceSettleAtExpected(env: Env, sessionId: number, actor: number | null): Promise<boolean> {
+export async function forceSettleAtExpected(env: Env, sessionId: number, actor: number | null): Promise<ForceSettleOutcome> {
   const session = await loadSession(env.DB, sessionId);
-  if (!session || session.status !== 'active' || session.expected_wage === null) return false;
+  if (!session) return 'skipped';
+  if (session.status === 'settled' && session.settle_source === 'forced') return 'already-forced';
+  if (session.status !== 'active' || session.expected_wage === null) return 'skipped';
   await settleActiveSession(env, session, session.expected_wage, 'forced', actor, null);
-  return true;
+  return 'settled-now';
 }
 
 // v6.64.4 上调强约（到期引擎适配器 + 关窗批共用）：promotion 会话按 E 快照无条件成约。
@@ -691,7 +701,9 @@ export async function forceSettlePromotionSessions(env: Env, opts: ExpiryOpts): 
     .all<{ id: number; club_id: number; player_name: string }>();
   let settled = 0;
   for (const row of res.results) {
-    if (!(await forceSettleAtExpected(env, row.id, null))) continue;
+    // 到期适配器的候选集只含 active 会话，三态下只有 settled-now 才由本路径直发通知；
+    // already-forced（并发对手——关窗 preflight——已结掉并攒了 outbox 行）不得再直发，否则双份
+    if ((await forceSettleAtExpected(env, row.id, null)) !== 'settled-now') continue;
     settled++;
     await queueClubNotification(env, row.club_id, 'promotion_forced', { player: row.player_name });
   }
@@ -1072,7 +1084,10 @@ export async function closeSilentSessions(env: Env, opts: ExpiryOpts): Promise<n
     // 所以已完成单的超时收口改成「按 E 强约，E 未出则按球员现行条款强约」，settle_source 仍记 forced。
     const transfer = await loadTransfer(db, row.transfer_id);
     if (transfer?.status === 'completed') {
-      const forced = (await forceSettleAtExpected(env, row.id, null)) || (await settleAtBaseTerms(env, row));
+      // 三态下仅 settled-now 视为「本次强约」；already-forced（并发对手结掉）与原 boolean false
+      // 同路：落 settleAtBaseTerms（对非 active 会话原样返回 false）→ 不计数不通知
+      const forced =
+        (await forceSettleAtExpected(env, row.id, null)) === 'settled-now' || (await settleAtBaseTerms(env, row));
       if (!forced) continue;
       closed++;
       await queueClubNotification(env, row.club_id, 'negotiation_timeout', { player: row.player_name, hours, reason: reasonText });

@@ -365,6 +365,35 @@ describe('v6.88.1 B3 outbox · TC-B3-02 preflight 段', () => {
     });
     // 批外强约已发生（不回滚）但通知只随批落库：第二局强约没有产生第二行通知
     expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM notifications WHERE template = 'promotion_forced'")).toMatchObject({ n: 1 });
+
+    // 断言 5 resume 恢复投递（v6.88.1 评审修复钉死；对称 TC-B3-06 局 B 的 home 路径）：
+    // DROP 触发器 → 再 close（同 run resume）→ 批外已强约的会话经「窗位内已成约反查」重新攒
+    // 通知随收口批落库、post_close 投出。修复前此路径 promoSessions 只查 active——已结会话不再
+    // 出现 ⇒ outbox 永不落行、notifications 恒 1（通知永久丢失，断言 5 必红）
+    fx.sqlite.exec('DROP TRIGGER fail_b3_preflight');
+    const res3 = await post('/api/admin/windows/close', {}, 'tok-admin', fx.env);
+    expect(res3.status).toBe(200);
+    const session2 = sqlGet<{ id: number }>(
+      fx.sqlite,
+      "SELECT s.id AS id FROM negotiation_sessions s JOIN players p ON p.id = s.player_id WHERE p.uid = 'fc61'",
+    )?.id ?? null;
+    expect(session2).not.toBeNull();
+    // preflight step 第二轮 attempt=2 转 done（resume 只前进）
+    expect(stepsOf(fx, run2Id)[0]).toMatchObject({ step: 'preflight', status: 'done', attempt: 2 });
+    // outbox：run2 恰 1 行、resume 反查重建（dedup 锚仍是 promotion:{sessionId2}）且已投出
+    const rows3 = outboxOf(fx.sqlite, 1, 2);
+    expect(rows3).toHaveLength(1);
+    expect(rows3[0]).toMatchObject({
+      club_id: fx.clubB,
+      template: 'promotion_forced',
+      dedup_key: `promotion:${session2}`,
+      status: 'sent',
+      attempt: 1,
+    });
+    // notifications：主局 1 行 + resume 投出 1 行 = 恰 2（无重复投递）
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM notifications WHERE template = 'promotion_forced'")).toMatchObject({ n: 2 });
+    // resume 走完全部段收口
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM window_close_runs WHERE id = ?', run2Id)).toMatchObject({ status: 'completed' });
   });
 });
 

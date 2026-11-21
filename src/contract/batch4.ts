@@ -686,8 +686,10 @@ export interface WindowCloseStatus {
 }
 
 /** 通知重投回执（POST /api/admin/windows/close/notifications/retry）：对最近 run 的
- *  pending/failed 行重投；delivered + failed + skipped = 捞到的行数，skipped 是防御值恒 0
- *  （已 sent 的行不进投递查询，坏 payload 计 failed 不计 skipped）。 */
+ *  pending/failed 行重投；delivered + failed + skipped = 捞到的行数。skipped 单投递者路径
+ *  恒 0（已 sent 的行不进投递查询；坏 payload 抢到收口计 failed）；与 post_close 投递或
+ *  另一位管理员并发重投时可为正——收口 UPDATE 按 status IN ('pending','failed') 前置抢占，
+ *  被抢先收口的行计 skipped，但投递动作本身拦不住（at-least-once 并发面，见 outbox 头注）。 */
 export interface WindowCloseNotifyRetryResult {
   delivered: number;
   failed: number;

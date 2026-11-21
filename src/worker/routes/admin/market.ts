@@ -186,8 +186,11 @@ app.get('/windows/close/status', async (c) => {
 });
 
 // POST /api/admin/windows/close/notifications/retry —— 重投最近一次关窗的待发/失败通知
-//（outbox pending/failed 行；已 sent 的行不进投递查询、不重投，at-least-once 口径见 outbox 注）。
-// run 未完成（running/failed）时拒——post_close 投递语义未到，先走 POST /windows/close 续跑段；
+//(outbox pending/failed 行；已 sent 的行不进投递查询、不重投，at-least-once 口径见 outbox 注)。
+// run 未完成（running/failed）时拒——post_close 投递语义未到，先走 POST /windows/close 续跑段。
+// 语义较立项 ask 的字面（「对最近 completed run 的行重投」）刻意收紧：只认最新 run 且非
+// completed 即 409，不回落更早的 completed run——避免管理员对还在推进中的未收口 run 抢跑重投
+// （与 post_close 投递并发的重复面见 outbox 头注②）。TC-B3-10 锁 409 行为。
 // 每次重投写审计 window_close_notify_retry 供对账（delivered/failed/skipped 落 after）。
 app.post('/windows/close/notifications/retry', async (c) => {
   const user = await requireAdmin(c.env, c.req.raw, 'club.registrations.manage');

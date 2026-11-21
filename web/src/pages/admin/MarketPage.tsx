@@ -1032,8 +1032,10 @@ function closeStepBadgeClass(status: string): string {
 }
 
 /** 管理端关窗进度面板：消费 GET /api/admin/windows/close/status（形状锁在契约 WindowCloseStatus）。
- *  「重试关窗」复用父级 closeWindow(false)——run 未完成（failed/running，窗口停在 closing）时
- *  走 resume 只前进；「重试通知」打 POST /api/admin/windows/close/notifications/retry 后 invalidate
+ *  「重试关窗」复用父级 closeWindow(false)，只在 run.status === 'failed' 时出现（v6.88.1 评审
+ *  收紧）：running 可能是另一管理员正在推进（租约被占），面板按钮点了必撞「关窗正在处理」409；
+ *  进程硬崩留下的 running run 走父级「关闭当前窗口」resume（租约过期后照常接续），入口不丢。
+ *  「重试通知」打 POST /api/admin/windows/close/notifications/retry 后 invalidate
  *  刷新，出现条件 = run 已完成且有 pending/failed 通知（评审口径：进程崩在 post_close 中途时
  *  step 可能停 pending，不能拿 step 状态当按钮条件）。 */
 function CloseStatusPanel(props: { status: WindowCloseStatus | undefined; busy: boolean; onRetryClose: () => void }) {
@@ -1063,7 +1065,7 @@ function CloseStatusPanel(props: { status: WindowCloseStatus | undefined; busy: 
   // 状态未到 / 全库无窗口行：面板不占位（窗口列表自身的加载态与空态已覆盖这两种情形）
   if (status === undefined || status.window === null) return null;
   const { window: win, run, steps, notifications } = status;
-  const canRetryClose = run !== null && run.status !== 'completed';
+  const canRetryClose = run !== null && run.status === 'failed';
   const canRetryNotify = run !== null && run.status === 'completed' && (notifications.failed > 0 || notifications.pending > 0);
   return (
     <div>

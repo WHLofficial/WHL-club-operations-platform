@@ -709,26 +709,44 @@ export async function closeWindow(
       //    v6.88.1 B3：通知不直发——攒成 outbox 行随下方 preflight 收口批原子落库
       //    （崩溃/段批回滚与 step 记账同进退），post_close 统一投递；
       //    dedup_key = promotion:{sessionId}（段级重放 / 重复 close 不重复落行）
+      //    v6.88.1 B3 评审修复（强约成功 + 收口批失败 + resume 不再丢通知）：候选集在 active
+      //    会话之外反查「本 run 窗位内已被强约成约」的会话（settled + settle_source='forced'
+      //    + settled_at >= run.started_at）。强约是批外动作：上一轮尝试已把会话结掉、随后收口
+      //    批回滚 ⇒ outbox 行不落而会话已成约；resume 若只查 active，这些会话凭空消失、通知
+      //    永久丢失。反查分支的三个限定各挡一类误捞：窗位（transfer 建单即带 season/window_seq）
+      //    挡历史窗位重捞（dedup_key 是 (run_id, dedup_key) 作用域，新 run 捞旧会话必重复投）；
+      //    settled_at >= started_at 挡「本 run 开跑前已被到期引擎 / 管理端强约、通知已直发」的
+      //    会话（防 close 再补一份重复通知）；settle_source='forced' 挡教练自行同意成约（那走
+      //    settle 通知路径，不该落 promotion_forced 模板）。settled-now 与 already-forced 都
+      //    攒 promoNotices，重复落行由 INSERT OR IGNORE 吃掉；already-forced 一并计入
+      //    promotionForceSettled（审计口径 = 本 run 确认成约的会话数，resume 轮计 0 会把首轮
+      //    已强约的事实从审计里抹掉）。
       const promoSessions = await db
         .prepare(
           `SELECT s.id, s.club_id, ${sqlDisplayName('p')} AS player_name
            FROM negotiation_sessions s
            JOIN transfers t ON t.id = s.transfer_id
            JOIN players p ON p.id = s.player_id
-           WHERE ${ACTIVE_SESSION_SQL} AND t.type = 'promotion' ORDER BY s.id LIMIT 200`,
+           WHERE t.type = 'promotion'
+             AND (s.status = 'active'
+                  OR (s.status = 'settled' AND s.settle_source = 'forced'
+                      AND t.season = ? AND t.window_seq = ? AND s.settled_at >= ?))
+           ORDER BY s.id LIMIT 200`,
         )
+        .bind(win.season, win.window_seq, run.startedAt)
         .all<{ id: number; club_id: number; player_name: string }>();
       const promoNotices: CloseNotificationItem[] = [];
       for (const s of promoSessions.results) {
-        if (await forceSettleAtExpected(env, s.id, actor)) {
-          promotionForceSettled++;
-          promoNotices.push({
-            clubId: s.club_id,
-            template: 'promotion_forced',
-            dedupKey: `promotion:${s.id}`,
-            data: { player: s.player_name },
-          });
-        }
+        const outcome = await forceSettleAtExpected(env, s.id, actor);
+        // skipped = 非 active 且非 forced 成约（教练自行同意 / 已取消）或 E 为 null——原样不攒不计数
+        if (outcome === 'skipped') continue;
+        promotionForceSettled++;
+        promoNotices.push({
+          clubId: s.club_id,
+          template: 'promotion_forced',
+          dedupKey: `promotion:${s.id}`,
+          data: { player: s.player_name },
+        });
       }
 
       // 3) 普通谈判强约：force 配置 / 无 E 检查已在 claim 校验（防死锁），这里只按 E 执行——
@@ -741,7 +759,9 @@ export async function closeWindow(
         )
         .all<{ id: number }>();
       for (const s of sessions.results) {
-        if (await forceSettleAtExpected(env, s.id, actor)) forceSettled++;
+        // 三态（v6.88.1 B3 评审修复）：普通谈判候选集只含 active 会话，仅 settled-now 计入强约数；
+        // already-forced（并发对手结掉）与原 boolean false 同语义不计数
+        if ((await forceSettleAtExpected(env, s.id, actor)) === 'settled-now') forceSettled++;
       }
 
       // 标 preflight done：强约计数落 step 自己的 summary_json（resume 收口回读用），同批把

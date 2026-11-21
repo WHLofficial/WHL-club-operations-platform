@@ -109,7 +109,8 @@ export async function adminForceSign(env: Env, sessionId: number, actor: number,
   if (!session) throw new HttpError(404, '谈判会话不存在');
   if (session.status !== 'active') throw new HttpError(409, '这条谈判已经结束');
   if (session.expected_wage === null) throw new HttpError(409, '买方还没提交新违约金，没有预期工资可按——等提交后再强制，或改用作废');
-  const ok = await forceSettleAtExpected(env, sessionId, actor);
+  // 三态（v6.88.1 B3）：会话已在上两行验过 active，settled-now 才算本次动作成约
+  const ok = (await forceSettleAtExpected(env, sessionId, actor)) === 'settled-now';
   if (ok) {
     const audit = createAuditStatement(db);
     await db.batch([

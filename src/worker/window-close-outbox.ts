@@ -5,8 +5,13 @@
 // window-machine.ts，本文件只提供落库语句构造、行读取与投递三件原语。
 //
 // 语义要点：
-//   · at-least-once，非 exactly-once：崩在「notifications 双通道行已写、outbox 行未标 sent」
-//     之间 → 重投会重复一条（站内信 / QQ 各多一条），如实登记不做签名去重（超范围）；
+//   · at-least-once，非 exactly-once。重复面有两类，如实登记（v6.88.1 B3 评审修复）：
+//     ① 崩溃面——崩在「notifications 双通道行已写、outbox 行未标 sent」之间 → 重投重复一条；
+//     ② 并发面——post_close 投递与管理端 retry（或两位管理员同时 retry）可对同一批
+//        pending/failed 行各投一次：行级抢占（收口 UPDATE 带 status IN ('pending','failed')
+//        前置，changes=0 视为已被对方收口、计 skipped）只保证 outbox 状态 / attempt / 计数不互
+//        踩、后到者不重复标，**拦不住投递动作本身**——queueClubNotificationEx 的双通道写入
+//        各执行各的，重复条数 = 并发投递者数 − 1。前端 retryBusy 只防单端单按钮。
 //   · 投递只走 queueClubNotificationEx（严格返回 ok/count/error）：ok=false 标 failed +
 //     last_error + attempt+1（不写 sent_at），ok=true（含无收件人 count=0 的完成态——没有
 //     收件人不是可重试故障）标 sent + sent_at；已 sent 的行不进投递查询、不重投；
@@ -125,34 +130,43 @@ function isRecordObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** ok=true 的收口：sent + sent_at + attempt+1 + last_error 清空 */
-async function markNotificationSent(db: D1Database, runId: number, dedupKey: string): Promise<void> {
-  await db
+/**
+ * ok=true 的收口：sent + sent_at + attempt+1 + last_error 清空。
+ * 带 status IN ('pending','failed') 前置抢占（v6.88.1 B3 评审修复）：并发投递者对同一行各投
+ * 一次拦不住（at-least-once 并发面），但收口必须只由抢到行的一方写——changes=0 = 已被对方
+ * 收口（对方已投出），后到者不得覆盖对方的 attempt / sent_at，返回 false 由调用方计 skipped。
+ */
+async function markNotificationSent(db: D1Database, runId: number, dedupKey: string): Promise<boolean> {
+  const r = await db
     .prepare(
       `UPDATE window_close_notifications
        SET status = 'sent', sent_at = ${NOW_SQL}, last_error = NULL, attempt = attempt + 1
-       WHERE run_id = ? AND dedup_key = ?`,
+       WHERE run_id = ? AND dedup_key = ? AND status IN ('pending', 'failed')`,
     )
     .bind(runId, dedupKey)
     .run();
+  return (r.meta.changes ?? 0) > 0;
 }
 
-/** ok=false / 坏 payload 的收口：failed + last_error + attempt+1（不写 sent_at） */
-async function markNotificationFailed(db: D1Database, runId: number, dedupKey: string, error: string): Promise<void> {
-  await db
+/** ok=false / 坏 payload 的收口：failed + last_error + attempt+1（不写 sent_at）；前置抢占同上 */
+async function markNotificationFailed(db: D1Database, runId: number, dedupKey: string, error: string): Promise<boolean> {
+  const r = await db
     .prepare(
       `UPDATE window_close_notifications
        SET status = 'failed', last_error = ?, attempt = attempt + 1
-       WHERE run_id = ? AND dedup_key = ?`,
+       WHERE run_id = ? AND dedup_key = ? AND status IN ('pending', 'failed')`,
     )
     .bind(error, runId, dedupKey)
     .run();
+  return (r.meta.changes ?? 0) > 0;
 }
 
 /**
  * 投递一个 run 的待发通知（post_close 与重试端点共用）：捞 pending/failed 行逐行投递，
  * 已 sent 的行不进查询、不重投。失败不抛（只统计）：调用方按 failed 数自行处置——
  * post_close 侧失败仅 step 标 failed + warnings，不阻断关窗（run 保持 completed）。
+ * skipped = 被并发投递者抢先收口的行（收口 UPDATE 抢占失败，见 markNotification* 注）：
+ * 单投递者路径恒 0，两字段口径同契约型 WindowCloseNotifyRetryResult。
  */
 export async function deliverCloseNotifications(env: Env, runId: number): Promise<CloseNotificationDeliverResult> {
   const db = env.DB;
@@ -168,6 +182,7 @@ export async function deliverCloseNotifications(env: Env, runId: number): Promis
 
   let delivered = 0;
   let failed = 0;
+  let skipped = 0;
   for (const row of rows.results) {
     // 坏 payload（解析失败 / 非对象）照 dispatchPendingNotifications 先例直接标 failed，防每轮重试空转
     let data: Record<string, unknown> | null = null;
@@ -179,35 +194,36 @@ export async function deliverCloseNotifications(env: Env, runId: number): Promis
     }
     if (data === null) {
       try {
-        await markNotificationFailed(db, runId, row.dedup_key, 'payload 无法解析');
+        if (await markNotificationFailed(db, runId, row.dedup_key, 'payload 无法解析')) failed++;
+        else skipped++; // 抢占失败 = 并发对手已收口该行（其投递结果说了算），本方不重复计
       } catch {
-        // 收口失败：状态留原样，可再次重投
+        // 收口异常：状态留原样，可再次重投；计 failed 走告警路径（保守方向）
+        failed++;
       }
-      failed++;
       continue;
     }
     try {
       const r = await queueClubNotificationEx(env, row.club_id, row.template, data);
       if (r.ok) {
-        await markNotificationSent(db, runId, row.dedup_key);
-        delivered++;
+        if (await markNotificationSent(db, runId, row.dedup_key)) delivered++;
+        else skipped++;
       } else {
-        await markNotificationFailed(db, runId, row.dedup_key, r.error ?? '未知');
-        failed++;
+        if (await markNotificationFailed(db, runId, row.dedup_key, r.error ?? '未知')) failed++;
+        else skipped++;
       }
     } catch {
       // 单行投递/收口异常算该行 failed：状态留原样可重投，不中断其余行
       failed++;
     }
   }
-  // skipped 为防御值：本查询只取 pending/failed，取到的每行必归入 delivered 或 failed ⇒ 恒 0
-  //（已 sent 的行不进查询、不重投）；坏 payload 也计 failed，不走 skipped。
-  return { delivered, failed, skipped: rows.results.length - delivered - failed };
+  // 每行恰归一个桶：delivered + failed + skipped = 捞到的行数（单投递者路径 skipped 恒 0）
+  return { delivered, failed, skipped };
 }
 
 /**
  * 重投一个 run 的失败/待发通知：与 deliverCloseNotifications 完全同义（同一查询、同一行级
- * 语义——ok 才标 sent），独立命名供管理端重试端点调用；已 sent 的行天然不进查询、不重投。
+ * 语义——ok 才标 sent、收口带抢占），独立命名供管理端重试端点调用；已 sent 的行天然不进
+ * 查询、不重投。与 post_close 投递并发时重复面见文件头注②。
  */
 export async function retryCloseNotifications(env: Env, runId: number): Promise<CloseNotificationDeliverResult> {
   return deliverCloseNotifications(env, runId);
