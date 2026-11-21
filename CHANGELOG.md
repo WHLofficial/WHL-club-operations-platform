@@ -4,7 +4,7 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
-## [v6.88.0] · 关窗持久化阶段机 B1+B2：closing/claim/租约/冻结 + 七段拆分与 parity（2026-11-21，本地未 push）
+## [v6.88.0] · 关窗持久化阶段机 B1+B2：closing/claim/租约/冻结 + 七段拆分与 parity（2026-11-21，已上线 Version dc2c29a2）
 
 **Added**
 
@@ -39,6 +39,12 @@
 - 七段已拆，但 `preflight`/`post_close` 的外部动作不在业务批内；通知未走 outbox（B3，`post_close` 失败只记 warnings，允许 at-least-once）；resume 重建后段的 parity 漂移与并发/崩溃矩阵在 B4。closing 冻结仍是整段兜底，不是逐阶段租约。
 - `finalize` 成功后 `post_close` 失败 = 关窗成功 + warnings；run 保持 completed，`post_close` step 留 failed 供管理端补跑。
 - B2-12 richFixture 19 表 parity 与 B2-06 loyalty 失败用例未落，MB2-03 因此未命中；覆盖缺口已在测试计划 §10.10 登记，不冒充全覆盖。
+
+**上线记录（2026-11-21）**
+
+- 生产迁移 `0096_window_close_runs.sql` 先于代码 apply（`wrangler d1 migrations apply whl-club --remote`，✅ 4 commands / 1.65ms；`window_close_runs`/`window_close_steps` 已存在）。
+- push `b337760..ed61dc5`（5 枚，含 B1+B2 四枚与 v6.87.1 上线记录）；CF 自动部署 **Version `dc2c29a2-47ae-44d0-b6c3-949d8ef6f227`**（2026-11-21T03:34:40Z）。
+- 生产回读：`/api/health`（d1/tour_db/kv 全 ok）、`/api/players?limit=1`、`/api/market/listings`、`/api/clubs`、`/api/squads` 全 200；线上入口 `assets/index-OOZhcDWI.js` 与本地 build 一致。
 
 ## [v6.87.1] · 测试补锁批：挂牌缺口 6 例 + 契约源码锁 14 例（2026-11-20，已上线 Version d687506b）
 

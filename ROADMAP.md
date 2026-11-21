@@ -134,7 +134,7 @@
 
 ---
 
-## v6.88.0 · 关窗持久化阶段机 B1+B2：closing/claim/租约/冻结 + 七段拆分与 parity（2026-11-21，本地未 push）
+## v6.88.0 · 关窗持久化阶段机 B1+B2：closing/claim/租约/冻结 + 七段拆分与 parity（2026-11-21，已上线 Version dc2c29a2）
 
 **缘起**：D1 `batch()` 的 `meta.changes=0` 是成功结果、不会中止后续语句——现有 `closeWindow` 批后 409「窗口刚被关过了」只是**事后报错**，并发后到者仍会提交工资/主场/忠诚/体检；`naming-ops.ts:1130-1140` 无本窗结算守卫，会多减合同期。用户裁决走 **B 持久化阶段机**，并定：closing 期间冻结全部俱乐部写操作、失败只前进重试、B1 先落 7 段中的单 step 骨架（B2 拆段）。
 
@@ -154,6 +154,8 @@
 **验收**：typecheck 三份全清；vitest **218 文件 / 3385 例全过**（139.5s；+25 例）；build 成功（`index-OOZhcDWI.js` 755.59 kB / gzip 236.93 kB）；MV-01…MV-08 全命中并还原（MV-01 由 T16 覆盖、MV-06 靠补 guardSql 后置观测，详见测试计划 §9）。
 
 **B2 边界（后续批次）**：通知未走 outbox（B3）；resume 重建后段 parity、并发/崩溃矩阵与租约交错在 B4；B2-06 loyalty 失败与 B2-12 richFixture 未落，测试矩阵缺口已在测试计划 §10.10 登记。迁移 `0096` 必须先 apply 再 push（CF Workers Builds 无迁移步骤）。
+
+**上线记录（2026-11-21）**：`0096_window_close_runs.sql` 先 apply 到生产（`window_close_runs`/`window_close_steps` 已建）；push `b337760..ed61dc5`；CF 自动部署 Version `dc2c29a2-47ae-44d0-b6c3-949d8ef6f227`（2026-11-21T03:34:40Z）；5 端点回读全 200、线上入口 `assets/index-OOZhcDWI.js` 与本地一致。
 
 ## v6.87.1 · 测试补锁批：挂牌缺口与契约源码锁（2026-11-20，已上线 Version d687506b）
 
