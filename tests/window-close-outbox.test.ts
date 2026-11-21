@@ -681,6 +681,11 @@ describe('v6.88.1 B3 outbox · TC-B3-09 GET /api/admin/windows/close/status', ()
        WHEN NEW.template = 'naming_mood' BEGIN SELECT RAISE(ABORT, 'boom-notif'); END;`,
     );
     expect((await post('/api/admin/windows/close', {}, 'tok-admin', fx.env)).status).toBe(200);
+    // failed 通知计数（施工表 B3-11）：retry 前 status 端点照实透出 failed=1——投递失败不阻断关窗、计数不撒谎
+    const failedStatusRes = await get('/api/admin/windows/close/status', 'tok-admin', fx.env);
+    expect(failedStatusRes.status).toBe(200);
+    const failedStatusBody: { notifications: { pending: number; sent: number; failed: number } } = await failedStatusRes.json();
+    expect(failedStatusBody.notifications).toEqual({ pending: 0, sent: 0, failed: 1 });
     fx.sqlite.exec('DROP TRIGGER fail_b3_notif');
     const runId = runIdOf(fx.sqlite, 1, 1);
     expect((await post('/api/admin/windows/close/notifications/retry', {}, 'tok-admin', fx.env)).status).toBe(200);
