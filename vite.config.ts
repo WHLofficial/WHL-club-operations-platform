@@ -18,5 +18,10 @@ export default defineConfig({
   },
   build: {
     outDir: "dist",
+    // 兼容国产浏览器旧内核（百度 / QQ 浏览器在红米等机型上常见 Chromium 66–79）：
+    // Vite 默认 target 是 es2020，产物里的 `??`（空值合并，Chrome 80+）会让旧内核在
+    // 解析期直接 SyntaxError，整个 bundle 一行不执行、页面只剩 CSS 背景色。
+    // 降到 chrome79 / safari13 后语法全部降级，实测 gzip 仅 +4KB。
+    target: ["chrome79", "safari13"],
   },
 });
