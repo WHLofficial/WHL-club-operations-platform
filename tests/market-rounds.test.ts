@@ -1854,7 +1854,7 @@ describe('冠名市场与招商轮路由（TC-ROUTE）', () => {
     const closeAllStart = machineSrc.indexOf('const summary: CloseWindowResult = {');
     const closeAllBatch = machineSrc.indexOf('await db.batch([', closeAllStart);
     const completeAt = machineSrc.indexOf(
-      '...completeCloseRun(db, run.id, CLOSE_STEP_CLOSE_ALL, summary),',
+      '...completeCloseRun(db, run.id, CLOSE_STEP_FINALIZE, summary),',
       closeAllBatch,
     );
     const notifyAt = machineSrc.indexOf('for (const n of home.notifications) {', completeAt);

@@ -17,9 +17,11 @@ import { closedRegularTicks, regularWindowOrdinal } from './contract-ticks.ts';
 import { settleOverdue } from './market-settle.ts';
 import { forceSettleAtExpected } from './negotiations.ts';
 import { windowPayrollStatements } from './window-payroll.ts';
+import type { PayrollSummary } from './window-payroll.ts';
 import { loyaltyMovements } from './season-settle.ts';
 import { growthPeriodStatements } from './growth.ts';
 import { windowHomeStatements } from './home.ts';
+import type { HomeWindowSummary } from './home.ts';
 import { queueClubNotification } from './notify.ts';
 import { SQUAD_RULE_LABEL, squadAuditStatements } from './squad-audit.ts';
 import { openSealedBatchOnWindowClose } from './sea-sealed.ts';
@@ -27,17 +29,29 @@ import { triggerDemandBatch } from './demand-ops.ts';
 import { ACTIVE_SESSION_SQL } from './negotiation-guard.ts';
 import { sqlDisplayName } from '../core/player-name.ts';
 import { slotsForCapacity } from '../core/venue.ts';
-// 关窗持久化阶段机（v6.88.0 B1）：认领 / 租约 / 收口原语 + closing 行读取
+// 关窗持久化阶段机（v6.88.0 B2 七段接线）：认领 / 租约 / 七段 step 原语 + closing 行读取
 import {
   acquireCloseLease,
   appendCloseRunWarnings,
   claimCloseRun,
   CLOSE_LEASE_TTL_MS,
-  CLOSE_STEP_CLOSE_ALL,
+  CLOSE_STEP_FINALIZE,
+  CLOSE_STEP_HOME,
+  CLOSE_STEP_LOYALTY,
+  CLOSE_STEP_PAYROLL,
+  CLOSE_STEP_POST_CLOSE,
+  CLOSE_STEP_PREFLIGHT,
+  CLOSE_STEP_SQUAD_AUDIT,
   completeCloseRun,
+  completeCloseStep,
   loadCloseRun,
+  loadCloseSteps,
   markCloseStepFailed,
+  nextPendingStep,
+  setCloseCurrentStep,
+  stepDone,
   type CloseRunRow,
+  type CloseStepRow,
 } from './window-close-runs.ts';
 import { loadCloseWindow } from './window-guard.ts';
 
@@ -467,17 +481,84 @@ function parseCloseSummary(raw: string): CloseWindowResult | null {
   };
 }
 
+// —— B2 段摘要回读（resume：本调用未重建的 done 段从 step.summary_json 取回 finalize 汇总输入）——
+// 各业务段（含 preflight 的强约计数）提交批用 completeCloseStep 的 summary 参数把摘要与 step done
+// 同批原子落库，回读值与该段原建批一致（不是按已提交状态重算）；对象键序与 builder 内存摘要一致，
+// summary_json 序列化逐字节同形。缺失/损坏只可能是库被手工改过——防御 500，正常路径不可达。
+
+function parseStepSummaryObject(steps: CloseStepRow[], name: string): Record<string, unknown> | null {
+  const row = steps.find((s) => s.step === name);
+  if (!row || row.summaryJson === null) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(row.summaryJson);
+  } catch {
+    return null;
+  }
+  return isRecordObject(parsed) ? parsed : null;
+}
+
+function requirePreflightCounts(steps: CloseStepRow[]): { forceSettled: number; promotionForceSettled: number } {
+  const rec = parseStepSummaryObject(steps, CLOSE_STEP_PREFLIGHT);
+  const nums = rec === null ? null : summaryNumbers(rec, ['forceSettled', 'promotionForceSettled']);
+  if (nums === null) throw new HttpError(500, '关窗步骤摘要缺失或损坏，无法收口');
+  const [forceSettled, promotionForceSettled] = nums;
+  return { forceSettled, promotionForceSettled };
+}
+
+function requirePayrollSummary(steps: CloseStepRow[]): PayrollSummary {
+  const rec = parseStepSummaryObject(steps, CLOSE_STEP_PAYROLL);
+  const nums = rec === null ? null : summaryNumbers(rec, CLOSE_PAYROLL_KEYS);
+  if (nums === null) throw new HttpError(500, '关窗步骤摘要缺失或损坏，无法收口');
+  const [wageClubs, wageTotal, taxClubs, taxTotal, wageFloorClubs] = nums;
+  return { wageClubs, wageTotal, taxClubs, taxTotal, wageFloorClubs };
+}
+
+function requireHomeSummary(steps: CloseStepRow[]): HomeWindowSummary {
+  const rec = parseStepSummaryObject(steps, CLOSE_STEP_HOME);
+  const nums = rec === null ? null : summaryNumbers(rec, CLOSE_HOME_KEYS);
+  if (nums === null) throw new HttpError(500, '关窗步骤摘要缺失或损坏，无法收口');
+  const [maintenanceClubs, maintenanceTotal, fansClubs, namingClubs, namingTotal, activityClubs, activityTotal, activityOpsCost, moodClubs, terminatedClubs, marketOffers, activatedClubs, pendingApplied, pendingVoided] = nums;
+  return {
+    maintenanceClubs, maintenanceTotal, fansClubs, namingClubs, namingTotal,
+    activityClubs, activityTotal, activityOpsCost, moodClubs, terminatedClubs,
+    marketOffers, activatedClubs, pendingApplied, pendingVoided,
+  };
+}
+
+function requireLoyaltySummary(steps: CloseStepRow[]): { count: number; total: number } {
+  const rec = parseStepSummaryObject(steps, CLOSE_STEP_LOYALTY);
+  const nums = rec === null ? null : summaryNumbers(rec, ['count', 'total']);
+  if (nums === null) throw new HttpError(500, '关窗步骤摘要缺失或损坏，无法收口');
+  const [count, total] = nums;
+  return { count, total };
+}
+
 /**
- * 关窗（v6.88.0 B1 持久化阶段机）：全部业务校验在 claim 之前的 open 状态下完成（失败直接 409，
- * 不进入 closing——防死锁，claim 后教练写被冻结闸挡住）→ claim（open→closing + INSERT run/steps
- * 小批，只认领不做业务）→ acquire 租约 → 惰性结算 / promotion 强约 / 普通谈判强约 / builders →
- * 单批 [closing→closed、审计、payroll/home/loyalty/squadAudit、step done、run completed] →
- * 批后 best-effort（二次结算、海捞开标、现有通知；失败只往 run.summary_json 的 warnings 追加，
- * 不把 run 改回 failed——B1 过渡语义，通知 outbox 是 B3）。
+ * 关窗（v6.88.0 B2 七段持久化阶段机）：全部业务校验在 claim 之前的 open 状态下完成（失败直接 409，
+ * 不进入 closing——防死锁，claim 后教练写被冻结闸挡住）→ claim（open→closing + INSERT run + INSERT
+ * 7 行 step 小批，只认领不做业务）→ acquire 租约 → 复核窗口/租约 → 读 steps 按 seq 找第一个未
+ * done 的段，七段固定顺序推进：
+ *   1 preflight    第二次惰性结算（显式 season/windowSeq）+ promotion 强约 + 普通谈判强约
+ *                  （外部动作幂等；开始前置 current_step，完成后小批标 done + 推进 current_step）；
+ *   2-5 业务段     payroll/home/loyalty/squad_audit——四个 builder 在任何业务段提交之前全部构建完
+ *                  （parity 硬口径，调用顺序与参数保持 B1），再按 step 顺序逐段提交：每批只含本段
+ *                  业务语句 + 本段 step done（段摘要同句落 step 行）+ current_step 推进下一段，
+ *                  批内任何报错整段回滚并 markCloseStepFailed（run failed、窗口留 closing、后段仍
+ *                  pending、已提交前段不回滚）；
+ *   6 finalize     closing→closed + 审计 + finalize done + run completed + summary_json 同批原子；
+ *   7 post_close   squad/home 通知 + 窗尾收口结算 + 海捞开标——finalize 成功即关窗成功（已裁决），
+ *                  本段失败只把 step 标 failed + warnings 追加进 run.summary_json，不把 run 改回
+ *                  failed、不改成功响应（通知 at-least-once：崩在已发未标之间允许重复一条；
+ *                  通知 outbox 是 B3）。
+ *
+ * resume：completed run 直接回放既有摘要；running/failed 继续推进——done 段跳过（已提交不回滚、
+ * 已 done 段不重跑），pending/failed 从最小 seq 继续。resume 跳过段的汇总输入从 step.summary_json
+ * 回读（各段提交批同批落库）；重建的后段会读到已提交状态，属 B4 恢复 parity 范围（本批登记在案），
+ * 正常路径批前读 parity 与 B1 逐字段一致。
  *
  * 并发与重试口径：claim 批的 status='open' 写闸是唯一认领闸（后到者读已有 run，不重建）；
- * close_all 前再过租约（acquireCloseLease，TTL 5 分钟）；批内不再依赖「UPDATE changes=0」挡并发。
- * resume：completed 直接回放既有摘要；running/failed 继续推进（已提交阶段不回滚，重试只前进）。
+ * 段推进前再过租约（acquireCloseLease，TTL 5 分钟）；批内不依赖「UPDATE changes=0」挡并发。
  */
 export async function closeWindow(
   env: Env,
@@ -532,188 +613,298 @@ export async function closeWindow(
     throw new HttpError(409, winNow !== null && winNow.status === 'closed' ? '窗口刚被关过了' : '关窗正在处理');
   }
 
+  // —— B2 七段接线：读 steps，按 seq 找到第一个未 done 的段（done 段跳过，pending/failed
+  //    从最小 seq 继续）。全部 step done 而 run 未收口正常流程不可达（finalize 批 = finalize
+  //    done + run completed 同批原子，post_close done 只在其后写入），防御分支报 500 ——
+  const steps = await loadCloseSteps(db, run.id);
+  const first = nextPendingStep(steps);
+  if (first === null) {
+    throw new HttpError(500, '关窗步骤已全部完成但运行记录未收口');
+  }
+  // 非业务段的执行闸按 step 行判 done（「已 done 段不重跑」硬口径；行缺失按未 done 处理——
+  // 旧 B1 run 只有一行 close_all 时七段全跑，与「重试只前进」兼容）
+  const ranPreflight = !stepDone(steps, CLOSE_STEP_PREFLIGHT);
+  const ranFinalize = !stepDone(steps, CLOSE_STEP_FINALIZE);
+  const ranPostClose = !stepDone(steps, CLOSE_STEP_POST_CLOSE);
+  // 正在推进的段（失败收口 markCloseStepFailed 按它点名；进入新段前前移）
+  let currentStep = first.step;
+
   try {
-    // 1) 惰性结算（close_all 前的第二次；第一次 preflight 已在 claim 之前的 open 状态下跑过）：
-    //    此刻窗口 closing——缺 listing 归属（season/window_seq 为 NULL）的结算用显式窗口回退
-    //    （v6.88.0：closing 下 status='open' 的旧回退落不到窗）。
-    //    origin='user'：这次惰性结算由管理员的关窗请求触发（actor 是管理员），不是定时任务
-    await settleOverdue(env, { actor, origin: 'user', season: win.season, windowSeq: win.window_seq });
-
-    // 2) promotion 强约（v6.64.4）：会话**无条件**按 E 快照成约（F 定死 ⇒ E 恒在），
-    //    不走 force 配置口径、也不挡关窗（用户裁决「窗关强约成约」）
-    const promoSessions = await db
-      .prepare(
-        `SELECT s.id, s.club_id, ${sqlDisplayName('p')} AS player_name
-         FROM negotiation_sessions s
-         JOIN transfers t ON t.id = s.transfer_id
-         JOIN players p ON p.id = s.player_id
-         WHERE ${ACTIVE_SESSION_SQL} AND t.type = 'promotion' ORDER BY s.id LIMIT 200`,
-      )
-      .all<{ id: number; club_id: number; player_name: string }>();
-    let promotionForceSettled = 0;
-    for (const s of promoSessions.results) {
-      if (await forceSettleAtExpected(env, s.id, actor)) {
-        promotionForceSettled++;
-        await queueClubNotification(env, s.club_id, 'promotion_forced', { player: s.player_name });
-      }
-    }
-
-    // 3) 普通谈判强约：force 配置 / 无 E 检查已在 claim 校验（防死锁），这里只按 E 执行——
-    //    claim 后教练写被冻结闸挡住，活跃会话只会减少不会新增
-    const sessions = await db
-      .prepare(
-        `SELECT s.id FROM negotiation_sessions s
-         JOIN transfers t ON t.id = s.transfer_id
-         WHERE ${ACTIVE_SESSION_SQL} AND t.type != 'promotion' ORDER BY s.id LIMIT 200`,
-      )
-      .all<{ id: number }>();
+    // —— 段 1 preflight（外部动作段，动作幂等；业务语句不进本段，收口是小批 step 记账）——
     let forceSettled = 0;
-    for (const s of sessions.results) {
-      if (await forceSettleAtExpected(env, s.id, actor)) forceSettled++;
+    let promotionForceSettled = 0;
+    if (ranPreflight) {
+      currentStep = CLOSE_STEP_PREFLIGHT;
+      // 每段开始前把 run.current_step 置为该段（施工表首动作；claim 已写 preflight，此处幂等
+      // 重申——外部动作不可进批，单独小批）
+      await db.batch([setCloseCurrentStep(db, run.id, CLOSE_STEP_PREFLIGHT)]);
+
+      // 1) 惰性结算（close_all 前的第二次；第一次 preflight 已在 claim 之前的 open 状态下跑过）：
+      //    此刻窗口 closing——缺 listing 归属（season/window_seq 为 NULL）的结算用显式窗口回退
+      //    （v6.88.0：closing 下 status='open' 的旧回退落不到窗）。
+      //    origin='user'：这次惰性结算由管理员的关窗请求触发（actor 是管理员），不是定时任务
+      await settleOverdue(env, { actor, origin: 'user', season: win.season, windowSeq: win.window_seq });
+
+      // 2) promotion 强约（v6.64.4）：会话**无条件**按 E 快照成约（F 定死 ⇒ E 恒在），
+      //    不走 force 配置口径、也不挡关窗（用户裁决「窗关强约成约」）
+      const promoSessions = await db
+        .prepare(
+          `SELECT s.id, s.club_id, ${sqlDisplayName('p')} AS player_name
+           FROM negotiation_sessions s
+           JOIN transfers t ON t.id = s.transfer_id
+           JOIN players p ON p.id = s.player_id
+           WHERE ${ACTIVE_SESSION_SQL} AND t.type = 'promotion' ORDER BY s.id LIMIT 200`,
+        )
+        .all<{ id: number; club_id: number; player_name: string }>();
+      for (const s of promoSessions.results) {
+        if (await forceSettleAtExpected(env, s.id, actor)) {
+          promotionForceSettled++;
+          await queueClubNotification(env, s.club_id, 'promotion_forced', { player: s.player_name });
+        }
+      }
+
+      // 3) 普通谈判强约：force 配置 / 无 E 检查已在 claim 校验（防死锁），这里只按 E 执行——
+      //    claim 后教练写被冻结闸挡住，活跃会话只会减少不会新增
+      const sessions = await db
+        .prepare(
+          `SELECT s.id FROM negotiation_sessions s
+           JOIN transfers t ON t.id = s.transfer_id
+           WHERE ${ACTIVE_SESSION_SQL} AND t.type != 'promotion' ORDER BY s.id LIMIT 200`,
+        )
+        .all<{ id: number }>();
+      for (const s of sessions.results) {
+        if (await forceSettleAtExpected(env, s.id, actor)) forceSettled++;
+      }
+
+      // 标 preflight done：强约计数落 step 自己的 summary_json（resume 收口回读用），同批把
+      // current_step 推进到 payroll——段收口小批原子
+      await db.batch([
+        ...completeCloseStep(db, run.id, CLOSE_STEP_PREFLIGHT, { forceSettled, promotionForceSettled }),
+        setCloseCurrentStep(db, run.id, CLOSE_STEP_PAYROLL),
+      ]);
     }
 
-    // 4) builders（口径与旧实现逐字一致）：
+    // —— parity 硬口径：四个 builder 在任何业务段提交之前全部构建完（payroll → home → loyalty →
+    //     squad_audit，调用顺序与参数保持 B1）。resume 时已提交段不重建（重建的后段会读到已提交
+    //     状态，属 B4 恢复 parity 范围，本批登记在案）；跳过段的摘要由 finalize 从 step 行回读。——
     // 窗末扣款（v1.4.0；v3.0.0 按窗类型分支）：常规窗 = 富人税 → 工资 → 维护费 → 冠名收租；
     // 临时窗 = 富人税 → 维护费（工资不扣、冠名不收不减）
-    const payroll = await windowPayrollStatements(env, win.season, win.window_seq, { chargeWages: !isTemporary });
+    currentStep = CLOSE_STEP_PAYROLL;
+    let payroll: Awaited<ReturnType<typeof windowPayrollStatements>> | null = stepDone(steps, CLOSE_STEP_PAYROLL)
+      ? null
+      : await windowPayrollStatements(env, win.season, win.window_seq, { chargeWages: !isTemporary });
     // 窗末主场结算（v1.5.0）：维护费+死忠演化+冠名收租并入同批（幂等闸/原子语义与工资一致）
-    const home = await windowHomeStatements(env, win.season, win.window_seq, { chargeNaming: !isTemporary, actor });
+    currentStep = CLOSE_STEP_HOME;
+    let home: Awaited<ReturnType<typeof windowHomeStatements>> | null = stepDone(steps, CLOSE_STEP_HOME)
+      ? null
+      : await windowHomeStatements(env, win.season, win.window_seq, { chargeNaming: !isTemporary, actor });
+    currentStep = CLOSE_STEP_LOYALTY;
     // 忠诚支出（规则 4.3.2；v6.47.0 用户令 2026-10-13 定为俱乐部支出）：只在常规窗且同赛季第 2 个
     // （中期）关窗时扣，效力按关窗后窗刻度算（本窗 +0.5 已计入），逐队汇总，幂等 ref = window/season*100+windowSeq
     // summary.total = 扣款金额绝对值（正数），余额不足时扣成负 = 欠款
-    let loyalty: { statements: ReturnType<Env['DB']['prepare']>[]; summary: { count: number; total: number } } = {
-      statements: [],
-      summary: { count: 0, total: 0 },
-    };
-    if (!isTemporary) {
-      const ordinal = await regularWindowOrdinal(db, win.season, win.window_seq);
-      if (ordinal === 2) {
-        loyalty = await loyaltyMovements(db, actor, win.season, win.window_seq, (await closedRegularTicks(db)) + 1);
+    let loyalty: {
+      statements: ReturnType<Env['DB']['prepare']>[];
+      summary: { count: number; total: number };
+    } | null = null;
+    if (!stepDone(steps, CLOSE_STEP_LOYALTY)) {
+      loyalty = { statements: [], summary: { count: 0, total: 0 } };
+      if (!isTemporary) {
+        const ordinal = await regularWindowOrdinal(db, win.season, win.window_seq);
+        if (ordinal === 2) {
+          loyalty = await loyaltyMovements(db, actor, win.season, win.window_seq, (await closedRegularTicks(db)) + 1);
+        }
       }
     }
+    currentStep = CLOSE_STEP_SQUAD_AUDIT;
     // v6.69.0 期三（§3.4 / D3 / D6）：关窗同一原子步里写名单存档与体检结果。
     // 临时窗不动赛季存档（它不推进效力、也不改变阵容语义），只做常规窗。
-    const squadAudit = isTemporary ? null : await squadAuditStatements(env, win.season, win.window_seq);
+    const squadAudit =
+      stepDone(steps, CLOSE_STEP_SQUAD_AUDIT) || isTemporary
+        ? null
+        : await squadAuditStatements(env, win.season, win.window_seq);
 
-    // 5) 单批（close_all）：closing→closed + 审计 + 全部业务语句 + step done + run completed
-    //    ——同批原子，批内任何语句报错 = 整批回滚，business 不落半截；批内不依赖 changes=0
-    //    挡并发（互斥已由 claim 写闸 + 租约两级承担，语义卡硬口径）
+    // —— 段 2-5 按 step 顺序提交：每批只含本段业务语句 + 本段 step done（段摘要同句落 step 行，
+    //     resume 收口回读用）+ current_step 推进下一段。批内任何语句报错 = 整批回滚（D1 batch
+    //     原子），由外层 catch markCloseStepFailed 收口：run failed、窗口留 closing、后段仍 pending、
+    //     已提交前段不回滚；批内不依赖 changes=0 挡并发（互斥由 claim 写闸 + 租约两级承担）——
+    if (payroll !== null) {
+      currentStep = CLOSE_STEP_PAYROLL;
+      await db.batch([
+        ...payroll.statements,
+        ...completeCloseStep(db, run.id, CLOSE_STEP_PAYROLL, payroll.summary),
+        setCloseCurrentStep(db, run.id, CLOSE_STEP_HOME),
+      ]);
+    }
+    if (home !== null) {
+      currentStep = CLOSE_STEP_HOME;
+      await db.batch([
+        ...home.statements,
+        ...completeCloseStep(db, run.id, CLOSE_STEP_HOME, home.summary),
+        setCloseCurrentStep(db, run.id, CLOSE_STEP_LOYALTY),
+      ]);
+    }
+    if (loyalty !== null) {
+      currentStep = CLOSE_STEP_LOYALTY;
+      await db.batch([
+        ...loyalty.statements,
+        ...completeCloseStep(db, run.id, CLOSE_STEP_LOYALTY, loyalty.summary),
+        setCloseCurrentStep(db, run.id, CLOSE_STEP_SQUAD_AUDIT),
+      ]);
+    }
+    // squad_audit 段：临时窗无业务语句也要标 done（施工表明文），提交闸按段 done 判而非按
+    // builder 产物判——临时窗 squadAudit 为 null（无存档语义）仍要走 step 记账批
+    if (!stepDone(steps, CLOSE_STEP_SQUAD_AUDIT)) {
+      currentStep = CLOSE_STEP_SQUAD_AUDIT;
+      await db.batch([
+        ...(squadAudit?.statements ?? []),
+        ...completeCloseStep(db, run.id, CLOSE_STEP_SQUAD_AUDIT),
+        setCloseCurrentStep(db, run.id, CLOSE_STEP_FINALIZE),
+      ]);
+    }
+
+    // —— 段 6 finalize 批：closing→closed + 审计 + finalize done + run completed + summary_json +
+    //     current_step 推进 post_close，同批原子——整批回滚则 run 不会停在「业务已提交、run 未标完」
+    //     的半截态 ——
+    currentStep = CLOSE_STEP_FINALIZE;
+    // finalize 汇总输入：本调用重建过的段用内存摘要；resume 跳过的 done 段从 step.summary_json
+    // 回读（各段提交批同批落库，回读值与该段原建批一致），包回 bundle 形状（statements 弃用不用），
+    // 让关窗摘要与审计继续以 payroll.summary / home.summary 同源引用（财政留痕源码锁口径）；
+    // 回读缺失/损坏只可能是库被手工改过——防御 500
+    const preflightCounts = ranPreflight
+      ? { forceSettled, promotionForceSettled }
+      : requirePreflightCounts(steps);
+    payroll = payroll ?? { statements: [], summary: requirePayrollSummary(steps) };
+    home = home ?? { statements: [], summary: requireHomeSummary(steps), notifications: [] };
+    loyalty = loyalty ?? { statements: [], summary: requireLoyaltySummary(steps) };
     const summary: CloseWindowResult = {
       ok: true,
       season: win.season,
       windowSeq: win.window_seq,
       isTemporary,
-      forceSettled,
+      forceSettled: preflightCounts.forceSettled,
       payroll: payroll.summary,
       home: home.summary,
       loyalty: loyalty.summary,
     };
     const audit = createAuditStatement(db);
-    await db.batch([
-      db
-        .prepare(`UPDATE season_windows SET status = 'closed', closed_at = ${nowSql()} WHERE season = ? AND window_seq = ? AND status = 'closing'`)
-        .bind(win.season, win.window_seq),
-      audit({
-        actor,
-        action: 'window_close',
-        targetType: 'season_window',
-        targetId: null,
-        origin: 'user',
-        after: {
-          season: win.season,
-          windowSeq: win.window_seq,
-          isTemporary,
-          forceSettled,
-          promotionForceSettled,
-          loyaltyCount: loyalty.summary.count,
-          loyaltyTotal: loyalty.summary.total, // 扣款金额绝对值（正数；余额可扣成负 = 欠款）
-          // 同批扣款的逐类汇总：逐笔流水已各自带 memo/ref，此处补「这次关窗一共扣了多少」的可核对口径
-          payroll: payroll.summary,
-          home: home.summary,
-        },
-      }),
-      ...payroll.statements,
-      ...home.statements,
-      ...loyalty.statements,
-      ...(squadAudit?.statements ?? []),
-      // step 标 done + run 标 completed / completed_at / summary_json（与业务同批原子：
-      // 整批回滚则 run 不会停在「业务已提交、run 未标完」的半截态）
-      ...completeCloseRun(db, run.id, CLOSE_STEP_CLOSE_ALL, summary),
-    ]);
+    if (ranFinalize) {
+      await db.batch([
+        db
+          .prepare(`UPDATE season_windows SET status = 'closed', closed_at = ${nowSql()} WHERE season = ? AND window_seq = ? AND status = 'closing'`)
+          .bind(win.season, win.window_seq),
+        audit({
+          actor,
+          action: 'window_close',
+          targetType: 'season_window',
+          targetId: null,
+          origin: 'user',
+          after: {
+            season: win.season,
+            windowSeq: win.window_seq,
+            isTemporary,
+            forceSettled: preflightCounts.forceSettled,
+            promotionForceSettled: preflightCounts.promotionForceSettled,
+            loyaltyCount: loyalty.summary.count,
+            loyaltyTotal: loyalty.summary.total, // 扣款金额绝对值（正数；余额可扣成负 = 欠款）
+            // 同批扣款的逐类汇总：逐笔流水已各自带 memo/ref，此处补「这次关窗一共扣了多少」的可核对口径
+            payroll: payroll.summary,
+            home: home.summary,
+          },
+        }),
+        // step 标 done + run 标 completed / completed_at / summary_json（与业务同批原子）
+        ...completeCloseRun(db, run.id, CLOSE_STEP_FINALIZE, summary),
+        setCloseCurrentStep(db, run.id, CLOSE_STEP_POST_CLOSE),
+      ]);
+    }
 
-    // —— 批后 best-effort（语义卡）：任一环失败只往 run.summary_json 的 warnings 追加、
-    //     不把 run 改回 failed；窗口此刻已 closed，业务事实不回滚（B1 过渡语义，随 docs 登记）——
+    // —— 段 7 post_close（后置动作段）：finalize 成功即关窗成功、run 已 completed（已裁决）——
+    //     本段任何失败只把 step 标 failed + warnings 追加进 run.summary_json，不把 run 改回 failed、
+    //     不改成功响应；通知 at-least-once（崩在已发未标之间允许重复一条，B2 不做 outbox，B3 收口）。
+    //     resume 跳过段的产出一律跳过：上一尝试的 audits/notifications 未持久化，数据不可得
+    //     （B4 恢复范围，本批登记在案）。 ——
+    currentStep = CLOSE_STEP_POST_CLOSE;
     const warnings: string[] = [];
     const warn = (label: string, err: unknown) =>
       warnings.push(`${label}：${err instanceof Error ? err.message : String(err)}`);
 
-    // 核验不通过通知（v6.69.0 D10）：批成败之后才发，按 (season, window_seq, club) 去重；
-    // 只给金额与规则名，不点球员姓名（球员页才是明细入口）。
-    if (squadAudit !== null) {
-      try {
-        for (const a of squadAudit.audits) {
-          if (a.isCpu || a.pass) continue;
-          const dup = await db
-            .prepare(
-              `SELECT 1 AS n FROM notifications WHERE club_id = ? AND template = 'squad_audit_failed'
-               AND payload LIKE ? LIMIT 1`,
-            )
-            .bind(a.clubId, `%"season":${win.season},"windowSeq":${win.window_seq}%`)
-            .first<{ n: number }>();
-          if (dup) continue;
-          const rules = [...new Set(a.issues.map((i) => SQUAD_RULE_LABEL[i.rule] ?? i.rule))].join('、');
-          const text =
-            `⚠️ S${win.season} 第 ${win.window_seq} 窗关窗体检：阵容不通过（涉及规则：${rules || '无'}）。` +
-            (a.overspend > 0 ? `工资 ${a.wageAfter.toFixed(2)}m，超出帽值 ${a.overspend.toFixed(2)}m。` : `工资 ${a.wageAfter.toFixed(2)}m。`) +
-            `本次不处置，下窗关闭前请按教练页红字清单调整。`;
-          await queueClubNotification(env, a.clubId, 'squad_audit_failed', {
-            text,
-            season: win.season,
-            windowSeq: win.window_seq,
-            overspend: a.overspend,
-            rules,
-          });
+    if (ranPostClose) {
+      // 核验不通过通知（v6.69.0 D10）：批成败之后才发，按 (season, window_seq, club) 去重；
+      // 只给金额与规则名，不点球员姓名（球员页才是明细入口）。
+      if (squadAudit !== null) {
+        try {
+          for (const a of squadAudit.audits) {
+            if (a.isCpu || a.pass) continue;
+            const dup = await db
+              .prepare(
+                `SELECT 1 AS n FROM notifications WHERE club_id = ? AND template = 'squad_audit_failed'
+                 AND payload LIKE ? LIMIT 1`,
+              )
+              .bind(a.clubId, `%"season":${win.season},"windowSeq":${win.window_seq}%`)
+              .first<{ n: number }>();
+            if (dup) continue;
+            const rules = [...new Set(a.issues.map((i) => SQUAD_RULE_LABEL[i.rule] ?? i.rule))].join('、');
+            const text =
+              `⚠️ S${win.season} 第 ${win.window_seq} 窗关窗体检：阵容不通过（涉及规则：${rules || '无'}）。` +
+              (a.overspend > 0 ? `工资 ${a.wageAfter.toFixed(2)}m，超出帽值 ${a.overspend.toFixed(2)}m。` : `工资 ${a.wageAfter.toFixed(2)}m。`) +
+              `本次不处置，下窗关闭前请按教练页红字清单调整。`;
+            await queueClubNotification(env, a.clubId, 'squad_audit_failed', {
+              text,
+              season: win.season,
+              windowSeq: win.window_seq,
+              overspend: a.overspend,
+              rules,
+            });
+          }
+        } catch (err) {
+          warn('体检未通过通知发送失败', err);
         }
-      } catch (err) {
-        warn('体检未通过通知发送失败', err);
       }
-    }
-    // 情绪变化 / 品牌解约通知（v6.13.0 C2）：批提交成功后才排队——批回滚不发假通知
-    try {
-      for (const n of home.notifications) {
-        await queueClubNotification(env, n.clubId, n.template, n.data);
+      // 情绪变化 / 品牌解约通知（v6.13.0 C2）：批提交成功后才排队——批回滚不发假通知
+      if (home !== null) {
+        try {
+          for (const n of home.notifications) {
+            await queueClubNotification(env, n.clubId, n.template, n.data);
+          }
+        } catch (err) {
+          warn('关窗通知发送失败', err);
+        }
       }
-    } catch (err) {
-      warn('关窗通知发送失败', err);
-    }
-    // 窗尾收口（4.4.7）：无人出价下架收费、仍在竞价的强制进待审——此刻窗口已落 closed，
-    // 窗口归属单据的 window_status 才会读到 closed（旧实现同口径：收口在批后跑第二次结算）。
-    // origin='user'：管理员关窗触发的惰性结算（actor 就是这位管理员）
-    try {
-      await settleOverdue(env, { actor, origin: 'user', season: win.season, windowSeq: win.window_seq });
-    } catch (err) {
-      warn('窗尾收口结算失败', err);
-    }
-    // 海捞暗标（v6.50.0）：关窗时批次还收着标 ⇒ 立即开标；失败批次留在 sealed，由下一轮 tick 兜底
-    // （到点或时刻表行结束都会开），不再吞掉「窗已关」这个事实——失败只记 warning
-    try {
-      await openSealedBatchOnWindowClose(env, actor, win.season, win.window_seq);
-    } catch (err) {
-      warn('海捞开标失败', err);
-    }
-    if (warnings.length > 0) {
+      // 窗尾收口（4.4.7）：无人出价下架收费、仍在竞价的强制进待审——此刻窗口已落 closed，
+      // 窗口归属单据的 window_status 才会读到 closed（旧实现同口径：收口在批后跑结算）。
+      // origin='user'：管理员关窗触发的惰性结算（actor 就是这位管理员）
       try {
-        await appendCloseRunWarnings(db, run.id, warnings);
+        await settleOverdue(env, { actor, origin: 'user', season: win.season, windowSeq: win.window_seq });
+      } catch (err) {
+        warn('窗尾收口结算失败', err);
+      }
+      // 海捞暗标（v6.50.0）：关窗时批次还收着标 ⇒ 立即开标；失败批次留在 sealed，由下一轮 tick 兜底
+      // （到点或时刻表行结束都会开），不再吞掉「窗已关」这个事实——失败只记 warning
+      try {
+        await openSealedBatchOnWindowClose(env, actor, win.season, win.window_seq);
+      } catch (err) {
+        warn('海捞开标失败', err);
+      }
+      // 段收口：有失败 → step 标 failed（markCloseStepFailed 的 run 语句按 status<>'completed'
+      // 守卫不改 run——run 保持 completed）+ warnings 追加进 run.summary_json；全部成功 → 标 done。
+      // 收口自身失败不再外抛：run 已 completed、事实不回滚，下次 closeWindow 走 completed 回放。
+      try {
+        if (warnings.length > 0) {
+          await markCloseStepFailed(db, run.id, CLOSE_STEP_POST_CLOSE, warnings.join('；'));
+          await appendCloseRunWarnings(db, run.id, warnings);
+        } else {
+          await db.batch([...completeCloseStep(db, run.id, CLOSE_STEP_POST_CLOSE)]);
+        }
       } catch {
-        // warning 归档失败不影响关窗结果本身（run 已 completed）
+        // 段收口失败不影响关窗结果本身（run 已 completed；step 停留原状，B2 已知后果登记在案）
       }
     }
+
     return summary;
   } catch (err) {
-    // close_all 段失败（惰性结算 / 强约 / builders / 主批任一环）：单独 batch 标 step failed +
-    // run failed + error，窗口保持 closing；重试只前进——已提交的结算/强约各自幂等，不回滚
+    // 段失败收口（preflight 外部动作 / builders / 任一段批）：单独 batch 标当前段 failed +
+    // run failed + error，窗口保持 closing；重试只前进——已提交段不回滚、已 done 段不重跑
     try {
-      await markCloseStepFailed(db, run.id, CLOSE_STEP_CLOSE_ALL, err);
+      await markCloseStepFailed(db, run.id, currentStep, err);
     } catch {
       // 收口失败不掩盖原始错误：run 留在 running，租约 TTL 到期后可重新 acquire
     }

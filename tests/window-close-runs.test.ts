@@ -1,4 +1,4 @@
-// v6.88.0 B1 关窗流水线测试（docs/test-plans/v6.88.0-window-close-pipeline.md 的 T01–T17 执行层）。
+// v6.88.0 关窗流水线测试（docs/test-plans/v6.88.0-window-close-pipeline.md 的 T01–T17 执行层；B2 扩七段失败/恢复用例）。
 // 被测面：claim 三语句小批（open→closing + 唯一键 INSERT run/step DO NOTHING）、租约 CAS
 // （TTL 5 分钟）、close_all 单批全有全无（失败停在 closing、批外强约不回滚）、closing 冻结闸
 // （window_closing 409 + 豁免子树）、openWindow / season-settle 的 closing 计数口径、
@@ -12,6 +12,10 @@
 //     必须挡关窗），claim 后的 settle 只做窗尾收口；
 //   · T12 的 cron 豁免已补：EXEMPT_PREFIXES 加入 /api/cron，探针见 T12；
 //   · T16 的 CHECK 紧枚举已补：0096 两个 status 列均建 CHECK，断言见 T16。
+//
+// B2 七段接线（v6.88.0）：claim 插 7 行 step（preflight..post_close，seq 1-7，初始 pending），
+// window-machine.ts 逐段构建、逐段提交；段完成批含 step done + current_step，失败标 step failed。
+// T04/T05/T05b/T06 已按 B2 语义锁「7 段全 done / 失败段 failed / current_step 推进」。
 import { describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { app } from '../src/worker/index.ts';
@@ -34,7 +38,13 @@ import {
   claimCloseRun,
   claimCloseStatements,
   CLOSE_LEASE_TTL_MS,
-  CLOSE_STEP_CLOSE_ALL,
+  CLOSE_STEPS,
+  CLOSE_STEP_FINALIZE,
+  CLOSE_STEP_HOME,
+  CLOSE_STEP_PAYROLL,
+  CLOSE_STEP_POST_CLOSE,
+  CLOSE_STEP_PREFLIGHT,
+  CLOSE_STEP_SQUAD_AUDIT,
 } from '../src/worker/window-close-runs.ts';
 import { settleOverdue } from '../src/worker/market-settle.ts';
 import { checkSeasonSettle } from '../src/worker/season-settle.ts';
@@ -164,15 +174,6 @@ interface RunRow {
   summary_json: string | null;
 }
 
-interface StepRow {
-  run_id: number;
-  step: string;
-  status: string;
-  attempt: number;
-  finished_at: string | null;
-  error: string | null;
-}
-
 function runRowOf(sqlite: DatabaseSync, season = 1, windowSeq = 1) {
   return sqlGet<RunRow>(
     sqlite,
@@ -183,21 +184,29 @@ function runRowOf(sqlite: DatabaseSync, season = 1, windowSeq = 1) {
   );
 }
 
-function stepRowOf(sqlite: DatabaseSync, runId: number) {
-  return sqlGet<StepRow>(
-    sqlite,
-    'SELECT run_id, step, status, attempt, finished_at, error FROM window_close_steps WHERE run_id = ? AND step = ?',
-    runId,
-    CLOSE_STEP_CLOSE_ALL,
-  );
-}
-
 function winStatusOf(sqlite: DatabaseSync, season = 1, windowSeq = 1) {
   return sqlGet<{ status: string; closed_at: string | null }>(
     sqlite,
     'SELECT status, closed_at FROM season_windows WHERE season = ? AND window_seq = ?',
     season,
     windowSeq,
+  );
+}
+
+interface StepState {
+  step: string;
+  seq: number;
+  status: string;
+  attempt: number;
+  error: string | null;
+  summary_json: string | null;
+}
+
+function stepsOf(fx: Fixture, runId: number): StepState[] {
+  return sqlAll<StepState>(
+    fx.sqlite,
+    'SELECT step, seq, status, attempt, error, summary_json FROM window_close_steps WHERE run_id = ? ORDER BY seq',
+    runId,
   );
 }
 
@@ -262,14 +271,17 @@ describe('v6.88.0 B1 关窗流水线 · claim（T01–T03）', () => {
   it('T01 claim 并发互斥：后到者 409，run/step/窗逐字段原值', async () => {
     const fx = await seedWindow();
     const run = await claimWithLease(fx, 'owner-a');
-    // 认领后的形态：窗 closing、run running + 租约未来、step pending
+    // 认领后的形态：窗 closing、run running + 租约未来、7 行 step 全 pending（seq 1-7）
     expect(winStatusOf(fx.sqlite)).toMatchObject({ status: 'closing', closed_at: null });
     const runBefore = runRowOf(fx.sqlite);
-    expect(runBefore).toMatchObject({ status: 'running', lease_owner: 'owner-a', current_step: CLOSE_STEP_CLOSE_ALL });
+    expect(runBefore).toMatchObject({ status: 'running', lease_owner: 'owner-a', current_step: CLOSE_STEP_PREFLIGHT });
     expect(runBefore?.lease_expires_at).not.toBeNull();
-    const steps = sqlAll<{ status: string }>(fx.sqlite, 'SELECT status FROM window_close_steps WHERE run_id = ?', run.id);
-    expect(steps).toHaveLength(1);
-    expect(steps[0]).toMatchObject({ status: 'pending' });
+    const steps = sqlAll<{ step: string; seq: number; status: string }>(
+      fx.sqlite,
+      'SELECT step, seq, status FROM window_close_steps WHERE run_id = ? ORDER BY seq',
+      run.id,
+    );
+    expect(steps).toEqual(CLOSE_STEPS.map((step, index) => ({ step, seq: index + 1, status: 'pending' })));
 
     // B 重放 POST close（模拟并发后到者）：acquire 撞租约 → 409 且零覆盖
     const res = await post('/api/admin/windows/close', {}, 'tok-admin', fx.env);
@@ -279,7 +291,7 @@ describe('v6.88.0 B1 关窗流水线 · claim（T01–T03）', () => {
     expect(winStatusOf(fx.sqlite)).toMatchObject({ status: 'closing' });
     expect(runRowOf(fx.sqlite)).toEqual(runBefore);
     expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM window_close_runs')).toMatchObject({ n: 1 });
-    expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM window_close_steps')).toMatchObject({ n: 1 });
+    expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM window_close_steps')).toMatchObject({ n: 7 });
   });
 
   it('T02 claim 批 SQL 幂等：重放零改行、closed 不复活、run 不重建', async () => {
@@ -293,7 +305,7 @@ describe('v6.88.0 B1 关窗流水线 · claim（T01–T03）', () => {
     expect(claim2.kind).toBe('resumed');
     expect(claim2.run.id).toBe(claim1.run.id);
     expect(runRowOf(fx.sqlite)).toEqual(runBefore);
-    expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM window_close_steps')).toMatchObject({ n: 1 });
+    expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM window_close_steps')).toMatchObject({ n: 7 });
     const replay = await fx.env.DB.batch(claimCloseStatements(fx.env.DB, 1, 1));
     expect(replay.map((r) => r.meta.changes ?? 0)).toEqual([0, 0, 0]);
     expect(runRowOf(fx.sqlite)).toEqual(runBefore);
@@ -385,8 +397,8 @@ describe('v6.88.0 B1 关窗流水线 · claim（T01–T03）', () => {
 
 // ---------- T04–T05b close_all 批 ----------
 
-describe('v6.88.0 B1 关窗流水线 · close_all 批（T04–T05b）', () => {
-  it('T04 close_all 成功全链：run completed + 审计对账 + 响应与 summary_json 逐字段相等', async () => {
+describe('v6.88.0 B2 关窗流水线 · 七段批（T04–T05b）', () => {
+  it('T04 七段成功全链：run completed + 审计对账 + 响应与 summary_json 逐字段相等', async () => {
     const fx = await seedWindow();
     await seedLiveBidding(fx);
     const res = await post('/api/admin/windows/close', {}, 'tok-admin', fx.env);
@@ -397,13 +409,18 @@ describe('v6.88.0 B1 关窗流水线 · close_all 批（T04–T05b）', () => {
     expect(winStatusOf(fx.sqlite)).toMatchObject({ status: 'closed' });
     expect(winStatusOf(fx.sqlite)?.closed_at).not.toBeNull();
     const run = runRowOf(fx.sqlite);
-    expect(run).toMatchObject({ status: 'completed', current_step: CLOSE_STEP_CLOSE_ALL });
+    // B2 七段接线：finalize 推进 current_step，post_close 是最后一段；完成即全部 done
+    expect(run).toMatchObject({ status: 'completed', current_step: CLOSE_STEP_POST_CLOSE });
     expect(run?.completed_at).not.toBeNull();
     expect(run?.error).toBeNull();
     expect(run?.lease_expires_at).toBeNull(); // 完成清租
-    const step = stepRowOf(fx.sqlite, run?.id ?? 0);
-    expect(step).toMatchObject({ status: 'done', attempt: 1 });
-    expect(step?.finished_at).not.toBeNull();
+    const stepsAfter = sqlAll<{ status: string; attempt: number }>(
+      fx.sqlite,
+      'SELECT status, attempt FROM window_close_steps WHERE run_id = ?',
+      run?.id ?? 0,
+    );
+    expect(stepsAfter).toHaveLength(7);
+    expect(stepsAfter.every((s) => s.status === 'done' && s.attempt === 1)).toBe(true);
 
     // 响应体与 JSON.parse(summary_json) 逐字段相等（completed 重入回放同源）
     const stored: unknown = JSON.parse(run?.summary_json ?? 'null');
@@ -424,7 +441,7 @@ describe('v6.88.0 B1 关窗流水线 · close_all 批（T04–T05b）', () => {
     expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM listings WHERE id = 1')).toMatchObject({ status: 'pending_review' });
   });
 
-  it('T05 close_all 批失败整批回滚：窗口停 closing、零半截行、失败释放租约；清障重试只前进无双扣', async () => {
+  it('T05 payroll 批失败整段回滚：窗口停 closing、零半截行、失败释放租约；清障重试只前进无双扣', async () => {
     const fx = await seedWindow();
     await seedLiveBidding(fx);
     fx.sqlite.exec(`CREATE TRIGGER fail_close BEFORE INSERT ON ledger_entries WHEN NEW.kind = 'wage' BEGIN SELECT RAISE(ABORT, 'boom-close'); END;`);
@@ -433,13 +450,19 @@ describe('v6.88.0 B1 关窗流水线 · close_all 批（T04–T05b）', () => {
     expect(res1.status).toBe(500); // 非 HttpError → onError 兜底
     expect(winStatusOf(fx.sqlite)).toMatchObject({ status: 'closing', closed_at: null });
     const run1 = runRowOf(fx.sqlite);
-    expect(run1).toMatchObject({ status: 'failed' });
+    expect(run1).toMatchObject({ status: 'failed', current_step: CLOSE_STEP_PAYROLL });
     expect(run1?.error).toContain('boom-close');
     expect(run1?.lease_expires_at).toBeNull(); // D-1：失败即释放租约
-    const step1 = stepRowOf(fx.sqlite, run1?.id ?? 0);
-    expect(step1).toMatchObject({ status: 'failed', attempt: 1 });
-    expect(step1?.finished_at).not.toBeNull();
-    expect(step1?.error).toContain('boom-close');
+    // B2 七段：preflight 已提交 done，payroll 批失败标 failed，之后各段保持 pending
+    const steps1 = sqlAll<{ step: string; status: string; attempt: number }>(
+      fx.sqlite,
+      'SELECT step, status, attempt FROM window_close_steps WHERE run_id = ? ORDER BY seq',
+      run1?.id ?? 0,
+    );
+    expect(steps1).toHaveLength(7);
+    expect(steps1[0]).toMatchObject({ step: CLOSE_STEP_PREFLIGHT, status: 'done', attempt: 1 });
+    expect(steps1[1]).toMatchObject({ step: CLOSE_STEP_PAYROLL, status: 'failed', attempt: 1 });
+    expect(steps1.slice(2).every((s) => s.status === 'pending' && s.attempt === 0)).toBe(true);
     // 整批回滚：工资/维护/忠诚零半截行、审计零行、余额不动、业务单据不动
     expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM ledger_entries WHERE ref_type = 'window' AND ref_id = 101")).toMatchObject({ n: 0 });
     expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'window_close'")).toMatchObject({ n: 0 });
@@ -464,7 +487,7 @@ describe('v6.88.0 B1 关窗流水线 · close_all 批（T04–T05b）', () => {
     expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM transfers WHERE idempotency_key = 'listing:1'")).toMatchObject({ n: 1 });
   });
 
-  it('T05b 批外强约的半截态不回滚：重放只前进，forceSettled 归零、强约/通知/过户不重复', async () => {
+  it('T05b 批外强约的半截态不回滚：重放只前进，强约计数保留、强约/通知/过户不重复', async () => {
     const fx = await seedWindow();
     // ① promotion 会话（真链路：训练营球员 + 上调单，E 快照开会时已落）
     fx.sqlite.exec(
@@ -521,20 +544,124 @@ describe('v6.88.0 B1 关窗流水线 · close_all 批（T04–T05b）', () => {
     const res2 = await post('/api/admin/windows/close', { force: true }, 'tok-admin', fx.env);
     expect(res2.status).toBe(200);
     const body2: Record<string, unknown> = await res2.json();
-    expect(body2).toMatchObject({ ok: true, season: 1, windowSeq: 1, forceSettled: 0 });
+    expect(body2).toMatchObject({ ok: true, season: 1, windowSeq: 1, forceSettled: 1 });
     const audits = sqlAll<{ after: string }>(fx.sqlite, "SELECT after FROM audit_log WHERE action = 'window_close'");
     expect(audits).toHaveLength(1);
     const after: Record<string, unknown> = JSON.parse(audits[0]?.after ?? '{}');
-    expect(after).toMatchObject({ promotionForceSettled: 0 });
+    // B2：preflight 只跑一次，计数随 step summary 落库；resume 不得把已强约计数归零
+    expect(after).toMatchObject({ forceSettled: 1, promotionForceSettled: 1 });
     expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'negotiation_settle'")).toMatchObject({ n: 2 });
     expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM notifications WHERE template = 'promotion_forced'")).toMatchObject({ n: 1 });
     expect(transferLedgerCount()).toEqual(transferLedger1); // 不双过户
     expect(winStatusOf(fx.sqlite)).toMatchObject({ status: 'closed' });
     expect(runRowOf(fx.sqlite)).toMatchObject({ status: 'completed' });
   });
-});
 
-// ---------- T06–T10 resume 与租约 ----------
+  it('B2-03 preflight 失败：批外强约整批回滚、run 停 preflight、后续段不启动', async () => {
+    const fx = await seedWindow();
+    fx.sqlite.exec(
+      `INSERT INTO transfers (type, player_id, from_club_id, to_club_id, fee, status, season, window_seq, idempotency_key, created_at)
+       VALUES ('transfer', 50, ${fx.clubA}, ${fx.clubB}, 15, 'signing', 1, 1, 'b2-preflight', '2026-07-01T00:00:00Z');
+       INSERT INTO negotiation_sessions (transfer_id, player_id, club_id, expected_wage, status, created_at)
+       VALUES ((SELECT id FROM transfers WHERE idempotency_key = 'b2-preflight'), 50, ${fx.clubB}, 2, 'active', '2026-07-01T00:00:00Z');
+       CREATE TRIGGER fail_preflight BEFORE UPDATE ON negotiation_sessions WHEN NEW.status = 'settled'
+       BEGIN SELECT RAISE(ABORT, 'boom-preflight'); END;`,
+    );
+    await createConfigService(fx.env.DB).set('window_force_settle', 'true');
+
+    const res = await post('/api/admin/windows/close', { force: true }, 'tok-admin', fx.env);
+    expect(res.status).toBe(500);
+    expect(winStatusOf(fx.sqlite)).toMatchObject({ status: 'closing', closed_at: null });
+    const run = runRowOf(fx.sqlite);
+    expect(run).toMatchObject({ status: 'failed', current_step: CLOSE_STEP_PREFLIGHT });
+    const steps = stepsOf(fx, run?.id ?? 0);
+    expect(steps).toHaveLength(7);
+    expect(steps[0]).toMatchObject({ step: CLOSE_STEP_PREFLIGHT, status: 'failed', attempt: 1 });
+    expect(steps[0]?.error).toContain('boom-preflight');
+    expect(steps.slice(1).every((s) => s.status === 'pending' && s.attempt === 0)).toBe(true);
+    // 批内整回滚：强约没落、窗内流水/审计零行
+    expect(sqlGet<{ status: string }>(fx.sqlite, 'SELECT status FROM negotiation_sessions')).toMatchObject({ status: 'active' });
+    expect(sqlGet<{ status: string }>(fx.sqlite, "SELECT status FROM transfers WHERE idempotency_key = 'b2-preflight'")).toMatchObject({ status: 'signing' });
+    expect(windowLedger(fx, 'wage')).toMatchObject({ n: 0 });
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'window_close'")).toMatchObject({ n: 0 });
+  });
+
+  it('B2-05 home 段失败：payroll 已提交、home 整批回滚、后续段 pending', async () => {
+    const fx = await seedWindow();
+    // 打点放在 home 段的 step done 上：该语句必在 home 批内，且批内任何一条失败都整批回滚
+    fx.sqlite.exec(`CREATE TRIGGER fail_home BEFORE UPDATE ON window_close_steps
+      WHEN NEW.step = 'home' AND NEW.status = 'done'
+      BEGIN SELECT RAISE(ABORT, 'boom-home'); END;`);
+
+    const res = await post('/api/admin/windows/close', {}, 'tok-admin', fx.env);
+    expect(res.status).toBe(500);
+    expect(winStatusOf(fx.sqlite)).toMatchObject({ status: 'closing' });
+    const run = runRowOf(fx.sqlite);
+    expect(run).toMatchObject({ status: 'failed', current_step: CLOSE_STEP_HOME });
+    const steps = stepsOf(fx, run?.id ?? 0);
+    expect(steps[0]).toMatchObject({ step: CLOSE_STEP_PREFLIGHT, status: 'done', attempt: 1 });
+    expect(steps[1]).toMatchObject({ step: CLOSE_STEP_PAYROLL, status: 'done', attempt: 1 });
+    expect(steps[2]).toMatchObject({ step: CLOSE_STEP_HOME, status: 'failed', attempt: 1 });
+    expect(steps.slice(3).every((s) => s.status === 'pending' && s.attempt === 0)).toBe(true);
+    // payroll 前段已提交（工资恰一份），home 段无半截维护费
+    expect(windowLedger(fx, 'wage')).toMatchObject({ n: 1 });
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'window_close'")).toMatchObject({ n: 0 });
+  });
+
+  it('B2-07 squad_audit 段失败：前四段已提交、体检批整回滚、finalize 不启动', async () => {
+    const fx = await seedWindow();
+    fx.sqlite.exec(`CREATE TRIGGER fail_audit BEFORE INSERT ON squad_audits
+      BEGIN SELECT RAISE(ABORT, 'boom-audit'); END;`);
+
+    const res = await post('/api/admin/windows/close', {}, 'tok-admin', fx.env);
+    expect(res.status).toBe(500);
+    expect(winStatusOf(fx.sqlite)).toMatchObject({ status: 'closing' });
+    const run = runRowOf(fx.sqlite);
+    expect(run).toMatchObject({ status: 'failed', current_step: CLOSE_STEP_SQUAD_AUDIT });
+    const steps = stepsOf(fx, run?.id ?? 0);
+    expect(steps.slice(0, 4).every((s) => s.status === 'done' && s.attempt === 1)).toBe(true);
+    expect(steps[4]).toMatchObject({ step: CLOSE_STEP_SQUAD_AUDIT, status: 'failed', attempt: 1 });
+    expect(steps.slice(5).every((s) => s.status === 'pending' && s.attempt === 0)).toBe(true);
+    expect(windowLedger(fx, 'wage')).toMatchObject({ n: 1 });
+    expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM squad_audits')).toMatchObject({ n: 0 });
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'window_close'")).toMatchObject({ n: 0 });
+  });
+
+  it('B2-08 finalize 失败：业务五段已提交、窗留 closing；清障重放只跑尾段、流水不重复', async () => {
+    const fx = await seedWindow();
+    fx.sqlite.exec(`CREATE TRIGGER fail_finalize BEFORE UPDATE ON season_windows WHEN NEW.status = 'closed'
+      BEGIN SELECT RAISE(ABORT, 'boom-finalize'); END;`);
+
+    const res1 = await post('/api/admin/windows/close', {}, 'tok-admin', fx.env);
+    expect(res1.status).toBe(500);
+    expect(winStatusOf(fx.sqlite)).toMatchObject({ status: 'closing', closed_at: null });
+    const run1 = runRowOf(fx.sqlite);
+    expect(run1).toMatchObject({ status: 'failed', current_step: CLOSE_STEP_FINALIZE });
+    const steps1 = stepsOf(fx, run1?.id ?? 0);
+    expect(steps1.slice(0, 5).every((s) => s.status === 'done' && s.attempt === 1)).toBe(true);
+    expect(steps1[5]).toMatchObject({ step: CLOSE_STEP_FINALIZE, status: 'failed', attempt: 1 });
+    expect(steps1[6]).toMatchObject({ step: CLOSE_STEP_POST_CLOSE, status: 'pending', attempt: 0 });
+    // 前五段已提交：工资恰一份；finalize 批未落：窗未关、审计零行
+    expect(windowLedger(fx, 'wage')).toMatchObject({ n: 1 });
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'window_close'")).toMatchObject({ n: 0 });
+
+    fx.sqlite.exec('DROP TRIGGER fail_finalize');
+    const res2 = await post('/api/admin/windows/close', {}, 'tok-admin', fx.env);
+    expect(res2.status).toBe(200);
+    expect(winStatusOf(fx.sqlite)).toMatchObject({ status: 'closed' });
+    const run2 = runRowOf(fx.sqlite);
+    expect(run2).toMatchObject({ status: 'completed', current_step: CLOSE_STEP_POST_CLOSE });
+    const steps2 = stepsOf(fx, run2?.id ?? 0);
+    expect(steps2).toHaveLength(7);
+    expect(steps2.every((s) => s.status === 'done')).toBe(true);
+    // finalize 失败一次后重放：attempt=2；其余段未重跑，attempt=1
+    expect(steps2[5]).toMatchObject({ step: CLOSE_STEP_FINALIZE, status: 'done', attempt: 2 });
+    expect(steps2[6]).toMatchObject({ step: CLOSE_STEP_POST_CLOSE, status: 'done', attempt: 1 });
+    // resume 跳过 done 段：工资不双发，审计恰一行
+    expect(windowLedger(fx, 'wage')).toMatchObject({ n: 1 });
+    expect(sqlGet<{ n: number }>(fx.sqlite, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'window_close'")).toMatchObject({ n: 1 });
+  });
+});
 
 describe('v6.88.0 B1 关窗流水线 · resume 与租约（T06–T10）', () => {
   it('T06 closing resume：failed run 重放只前进、换主成功', async () => {
@@ -547,11 +674,17 @@ describe('v6.88.0 B1 关窗流水线 · resume 与租约（T06–T10）', () => 
     expect(res.status).toBe(200);
     expect(winStatusOf(fx.sqlite)).toMatchObject({ status: 'closed' });
     const done = runRowOf(fx.sqlite);
-    expect(done).toMatchObject({ status: 'completed' });
+    expect(done).toMatchObject({ status: 'completed', current_step: CLOSE_STEP_POST_CLOSE });
     expect(done?.completed_at).not.toBeNull();
     expect(done?.lease_owner).toBeNull(); // 完成清租；绝不残留 owner-a
-    const step = stepRowOf(fx.sqlite, done?.id ?? 0);
-    expect(step).toMatchObject({ status: 'done' });
+    // B2：resume 从头跑完 7 段，全部 done
+    const stepsAfter = sqlAll<{ status: string; attempt: number }>(
+      fx.sqlite,
+      'SELECT status, attempt FROM window_close_steps WHERE run_id = ?',
+      done?.id ?? 0,
+    );
+    expect(stepsAfter).toHaveLength(7);
+    expect(stepsAfter.every((s) => s.status === 'done' && s.attempt === 1)).toBe(true);
   });
 
   it('T07 租约过期接管：过期后他人重放成功接管', async () => {
@@ -597,7 +730,7 @@ describe('v6.88.0 B1 关窗流水线 · resume 与租约（T06–T10）', () => 
     const body: { error: string } = await res.json();
     expect(body.error).toContain('关窗正在处理');
     expect(runRowOf(fx.sqlite)).toEqual(runBefore);
-    expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM window_close_steps WHERE run_id = ?', run.id)).toMatchObject({ n: 1 });
+    expect(sqlGet<{ n: number }>(fx.sqlite, 'SELECT COUNT(*) AS n FROM window_close_steps WHERE run_id = ?', run.id)).toMatchObject({ n: 7 });
     expect(winStatusOf(fx.sqlite)).toMatchObject({ status: 'closing', closed_at: null });
   });
 
@@ -633,19 +766,20 @@ describe('v6.88.0 B1 关窗流水线 · resume 与租约（T06–T10）', () => 
       },
     });
     // SQL 直造防御态（claim 造不出 completed）：窗 closing + run completed + step done + 既有审计/流水
+    // （B2 过渡：step 行以 preflight 占位——close_all 行已不再由 claim 插入；B2-11 改造为 7 行全 done）
     fx.sqlite.exec(`UPDATE season_windows SET status = 'closing' WHERE season = 1 AND window_seq = 1`);
     fx.sqlite
       .prepare(
         `INSERT INTO window_close_runs (season, window_seq, status, current_step, started_at, updated_at, completed_at, error, summary_json)
          VALUES (1, 1, 'completed', ?, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', NULL, ?)`,
       )
-      .run(CLOSE_STEP_CLOSE_ALL, summaryJson);
+      .run(CLOSE_STEP_PREFLIGHT, summaryJson);
     fx.sqlite
       .prepare(
         `INSERT INTO window_close_steps (run_id, step, seq, status, attempt, finished_at)
          SELECT id, ?, 1, 'done', 1, '2026-01-01T00:00:00.000Z' FROM window_close_runs WHERE season = 1 AND window_seq = 1`,
       )
-      .run(CLOSE_STEP_CLOSE_ALL);
+      .run(CLOSE_STEP_PREFLIGHT);
     fx.sqlite.exec(
       `INSERT INTO audit_log (actor, action, target_type, target_id, origin, before, after, at)
        VALUES (1, 'window_close', 'season_window', NULL, 'user', NULL, '{}', '2026-01-01T00:00:00.000Z')`,
@@ -864,10 +998,16 @@ describe('v6.88.0 B1 关窗流水线 · 迁移与批后降级（T16–T17）', (
     const db = createTestD1(sqlite);
     sqlite.exec(`DELETE FROM window_close_steps; DELETE FROM window_close_runs; UPDATE season_windows SET status = 'open' WHERE season = 1 AND window_seq = 1;`);
     const first = await db.batch(claimCloseStatements(db, 1, 1));
-    expect(first.map((r) => r.meta.changes ?? 0)).toEqual([1, 1, 1]);
+    expect(first.map((r) => r.meta.changes ?? 0)).toEqual([1, 1, 7]);
     expect(sqlGet<{ status: string }>(sqlite, 'SELECT status FROM season_windows WHERE season = 1 AND window_seq = 1')).toMatchObject({ status: 'closing' });
     expect(sqlGet<{ n: number }>(sqlite, 'SELECT COUNT(*) AS n FROM window_close_runs WHERE season = 1 AND window_seq = 1')).toMatchObject({ n: 1 });
-    expect(sqlGet<{ n: number }>(sqlite, 'SELECT COUNT(*) AS n FROM window_close_steps WHERE step = ?', CLOSE_STEP_CLOSE_ALL)).toMatchObject({ n: 1 });
+    // 7 行 step：名字/序号与 CLOSE_STEPS 同源、初始 pending、attempt 0
+    expect(
+      sqlAll<{ step: string; seq: number; status: string; attempt: number }>(
+        sqlite,
+        'SELECT step, seq, status, attempt FROM window_close_steps ORDER BY seq',
+      ),
+    ).toEqual(CLOSE_STEPS.map((step, index) => ({ step, seq: index + 1, status: 'pending', attempt: 0 })));
     // 重放：三句全 0（open 写闸 + 两级 ON CONFLICT DO NOTHING）
     const second = await db.batch(claimCloseStatements(db, 1, 1));
     expect(second.map((r) => r.meta.changes ?? 0)).toEqual([0, 0, 0]);
@@ -877,7 +1017,7 @@ describe('v6.88.0 B1 关窗流水线 · 迁移与批后降级（T16–T17）', (
       sqlite
         .prepare(
           `INSERT INTO window_close_runs (season, window_seq, status, current_step, started_at, updated_at)
-           VALUES (1, 1, 'running', 'close_all', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`,
+           VALUES (1, 1, 'running', 'preflight', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`,
         )
         .run();
     expect(insertRun).toThrow(/UNIQUE/);
@@ -898,8 +1038,14 @@ describe('v6.88.0 B1 关窗流水线 · 迁移与批后降级（T16–T17）', (
     expect(res.status).toBe(200);
     expect(winStatusOf(fx.sqlite)).toMatchObject({ status: 'closed' });
     const run = runRowOf(fx.sqlite);
-    expect(run).toMatchObject({ status: 'completed' }); // 不改回 failed
+    expect(run).toMatchObject({ status: 'completed', current_step: CLOSE_STEP_POST_CLOSE }); // completed 不改回 failed
     expect(run?.completed_at).not.toBeNull();
+    // B2：业务段全部 done，post_close 保留 failed 供管理端补跑；run 不因后置失败降级
+    const steps = stepsOf(fx, run?.id ?? 0);
+    expect(steps).toHaveLength(7);
+    expect(steps.slice(0, 6).every((s) => s.status === 'done' && s.attempt === 1)).toBe(true);
+    expect(steps[6]).toMatchObject({ step: CLOSE_STEP_POST_CLOSE, status: 'failed', attempt: 1 });
+    expect(steps[6]?.error).toContain('boom-tail');
     const stored: Record<string, unknown> = JSON.parse(run?.summary_json ?? '{}');
     expect(Array.isArray(stored.warnings)).toBe(true); // warnings 非空且含该段标识
     expect(JSON.stringify(stored.warnings)).toContain('窗尾收口结算失败');

@@ -1,14 +1,16 @@
-// 关窗持久化阶段机·持久化原语（B1 骨架）：把关窗从「一次 db.batch 全有全无」改造成
-// 「持久化阶段机」——窗口状态 open → closing → closed，失败停在 closing，重试只前进、
-// 不回滚已提交阶段。本文件提供认领 / 租约 / 步骤失败收口 / 运行完成收口 / run 读取；
-// 业务编排（close_all = 把现有 closeWindow 整段包进来）在 window-machine.ts 接线，B2 才拆
-// payroll/home/loyalty/squad_audit/finalize/post_close。
+// 关窗持久化阶段机·持久化原语（B1 骨架 + B2 七段）：把关窗从「一次 db.batch 全有全无」
+// 改造成「持久化阶段机」——窗口状态 open → closing → closed，失败停在 closing，重试只前进、
+// 不回滚已提交阶段。本文件提供认领 / 租约 / 步骤失败收口 / 运行完成收口 / run 读取，以及 B2
+// 拆步原语：7 个 step 常量 + loadCloseSteps / completeCloseStep / setCloseCurrentStep /
+// stepDone / nextPendingStep（claim 批按 CLOSE_STEPS 插 7 行 step）。业务编排在
+// window-machine.ts，按 CLOSE_STEPS 顺序逐段构建、逐段提交；preflight 与 post_close 的外部
+// 动作在各自段内独立收口。
 //
 // 关键陷阱（本文件成立的前提）：D1 batch 里某条 UPDATE meta.changes=0 **不会**中止后续语句
 // ——所以 claim 批只含「窗口 open→closing + INSERT run + INSERT steps」三条语句，绝不把
 // 业务语句塞进 claim 批，业务批里也不得再依赖「某条 UPDATE changes=0」挡并发。并发互斥
 // 由两级承担：claim 的 status='open' 写闸（后到者 changes=0，读已有 run 不重建）+
-// close_all 前的租约（acquireCloseLease）。
+// 每段提交前的租约（acquireCloseLease）。
 //
 // 防死锁：全部业务校验在 claim 批之前、status='open' 下完成（matched_pending / pending_review /
 // 活跃谈判 / force 配置 / 无 E 检查）。claim 之后窗口冻结全部俱乐部写——若把校验放在 claim 后，
@@ -25,8 +27,25 @@ const NOW_SQL = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
 /** 租约 TTL 建议值（语义卡：5 分钟）；调用方可自行传 ttlMs 覆盖 */
 export const CLOSE_LEASE_TTL_MS = 5 * 60 * 1000;
 
-/** B1 唯一的步骤名；B2 起拆 payroll/home/loyalty/squad_audit/finalize/post_close */
-export const CLOSE_STEP_CLOSE_ALL = 'close_all';
+// —— B2 拆步：7 个持久化 step（顺序固定；CLOSE_STEPS 数组序即 seq，下标 i 的 seq = i + 1）——
+export const CLOSE_STEP_PREFLIGHT = 'preflight';
+export const CLOSE_STEP_PAYROLL = 'payroll';
+export const CLOSE_STEP_HOME = 'home';
+export const CLOSE_STEP_LOYALTY = 'loyalty';
+export const CLOSE_STEP_SQUAD_AUDIT = 'squad_audit';
+export const CLOSE_STEP_FINALIZE = 'finalize';
+export const CLOSE_STEP_POST_CLOSE = 'post_close';
+
+/** 按 seq 固定顺序的 7 个关窗步骤名（claim 批按此数组一次插 7 行 pending） */
+export const CLOSE_STEPS: readonly string[] = [
+  CLOSE_STEP_PREFLIGHT,
+  CLOSE_STEP_PAYROLL,
+  CLOSE_STEP_HOME,
+  CLOSE_STEP_LOYALTY,
+  CLOSE_STEP_SQUAD_AUDIT,
+  CLOSE_STEP_FINALIZE,
+  CLOSE_STEP_POST_CLOSE,
+];
 
 /** window_close_runs 行（camelCase 映射，DTO 口径同 listWindows） */
 export interface CloseRunRow {
@@ -162,8 +181,12 @@ async function resolveExistingRun(
 /**
  * claim 批的三条语句（导出给测试直跑：锁 D1 的 INSERT…SELECT…WHERE EXISTS…ON CONFLICT 语法，
  * 也保证测试执行的就是生产同一份 SQL——不在测试里复制粘贴，防「测试绿、生产漂」）。
+ * B2 拆步后语句③按 CLOSE_STEPS 一次插 7 行 step（seq 1-7、初始 pending；UNION ALL 派生表，
+ * 名字/序号与数组同源）：首跑 meta.changes = [1, 1, 7]、重放 [0, 0, 0]；claim 批仍只含
+ * open→closing + INSERT run + INSERT steps，业务语句绝不进 claim 批。
  */
 export function claimCloseStatements(db: D1Database, season: number, windowSeq: number): D1PreparedStatement[] {
+  const stepArms = CLOSE_STEPS.map(() => 'SELECT ? AS step, ? AS seq').join(' UNION ALL ');
   return [
     db
       .prepare(`UPDATE season_windows SET status = 'closing' WHERE season = ? AND window_seq = ? AND status = 'open'`)
@@ -175,14 +198,20 @@ export function claimCloseStatements(db: D1Database, season: number, windowSeq: 
          WHERE EXISTS (SELECT 1 FROM season_windows WHERE season = ? AND window_seq = ? AND status = 'closing')
          ON CONFLICT (season, window_seq) DO NOTHING`,
       )
-      .bind(season, windowSeq, 'running', CLOSE_STEP_CLOSE_ALL, season, windowSeq),
+      .bind(season, windowSeq, 'running', CLOSE_STEP_PREFLIGHT, season, windowSeq),
     db
       .prepare(
         `INSERT INTO window_close_steps (run_id, step, seq, status, attempt)
-         SELECT id, ?, 1, 'pending', 0 FROM window_close_runs WHERE season = ? AND window_seq = ?
+         SELECT r.id, s.step, s.seq, 'pending', 0
+         FROM window_close_runs r, (${stepArms}) s
+         WHERE r.season = ? AND r.window_seq = ?
          ON CONFLICT (run_id, step) DO NOTHING`,
       )
-      .bind(CLOSE_STEP_CLOSE_ALL, season, windowSeq),
+      .bind(
+        ...CLOSE_STEPS.flatMap((step, index) => [step, index + 1]),
+        season,
+        windowSeq,
+      ),
   ];
 }
 
@@ -198,7 +227,7 @@ export function claimCloseStatements(db: D1Database, season: number, windowSeq: 
  */
 export async function claimCloseRun(
   env: Env,
-  // claim 批只含三条语句、不写审计（语义卡硬口径）；actor 由调用方在 close_all 批的
+  // claim 批只含三条语句、不写审计（语义卡硬口径）；actor 由调用方在 finalize 批的
   // window_close 审计里使用，本签名按语义卡保留占位
   _actor: number,
   season: number,
@@ -291,7 +320,7 @@ export async function acquireCloseLease(db: D1Database, runId: number, owner: st
 }
 
 /**
- * close_all 批失败后的收口（单独 batch，窗口保持 closing）：step 标 failed（attempt+1）+
+ * 任一段批失败后的收口（单独 batch，窗口保持 closing）：step 标 failed（attempt+1）+
  * run 标 failed 并清租约（清掉才能让下一次重试立即 acquire，不必干等 TTL 过期）。
  * 幂等：step 已 done 不改；run 已 completed 不改。
  */
@@ -308,18 +337,18 @@ export async function markCloseStepFailed(db: D1Database, runId: number, step: s
       .prepare(
         `UPDATE window_close_runs SET status = 'failed', error = ?, updated_at = ${NOW_SQL},
            lease_owner = NULL, lease_expires_at = NULL
-         WHERE id = ? AND status <> 'completed'`,
+           WHERE id = ? AND status <> 'completed'`,
       )
       .bind(message, runId),
   ]);
 }
 
 /**
- * close_all 批成功后的收口语句（追加进同一个 db.batch 的末尾，与业务同批原子）：
+ * finalize 批成功后的收口语句（追加进同一个 db.batch 的末尾，与业务同批原子）：
  * step 标 done（attempt+1）+ run 标 completed / completed_at / summary_json（清 error 与租约）。
  * 批内任何语句报错 = 整批回滚，run 不会停在「业务已提交、run 未标完」的半截态。
  *
- * @param summary 完成摘要原文（B1 = closeWindow 回执同形对象；调用方必须传可 JSON 序列化值，
+ * @param summary 完成摘要原文（closeWindow 回执同形对象；调用方必须传可 JSON 序列化值，
  *                completed 重入路径靠它原样返回既有摘要）
  */
 export function completeCloseRun(db: D1Database, runId: number, step: string, summary: unknown): D1PreparedStatement[] {
@@ -341,7 +370,7 @@ export function completeCloseRun(db: D1Database, runId: number, step: string, su
 }
 
 /**
- * 批后 post actions 的 warning 归档（B1 过渡语义：二次 settleOverdue / 海捞开标 / 现有通知发送
+ * 批后 post actions 的 warning 归档（B2 过渡语义：二次 settleOverdue / 海捞开标 / 现有通知发送
  * 保持 best-effort，失败只记 warning、不把 run 改回 failed；通知 outbox 是 B3）。
  * 只往 summary_json 的 warnings 数组追加，不碰其余键、不改 run 状态。
  */
@@ -357,4 +386,114 @@ export async function appendCloseRunWarnings(db: D1Database, runId: number, warn
     .prepare(`UPDATE window_close_runs SET summary_json = ?, updated_at = ${NOW_SQL} WHERE id = ?`)
     .bind(JSON.stringify(merged), runId)
     .run();
+}
+
+// —— B2 拆步原语（7 step 段推进 / resume 分派 / 测试直跑共用） ——
+
+/** window_close_steps 行（camelCase 映射；loadCloseSteps 返回值、stepDone / nextPendingStep 入参） */
+export interface CloseStepRow {
+  runId: number;
+  step: string;
+  seq: number;
+  /** pending/done/failed（迁移 0096 DDL CHECK 紧枚举口径） */
+  status: string;
+  attempt: number;
+  startedAt: string | null;
+  finishedAt: string | null;
+  summaryJson: string | null;
+  error: string | null;
+}
+
+interface CloseStepDbRow {
+  run_id: number;
+  step: string;
+  seq: number;
+  status: string;
+  attempt: number;
+  started_at: string | null;
+  finished_at: string | null;
+  summary_json: string | null;
+  error: string | null;
+}
+
+function toCloseStepRow(row: CloseStepDbRow): CloseStepRow {
+  return {
+    runId: row.run_id,
+    step: row.step,
+    seq: row.seq,
+    status: row.status,
+    attempt: row.attempt,
+    startedAt: row.started_at,
+    finishedAt: row.finished_at,
+    summaryJson: row.summary_json,
+    error: row.error,
+  };
+}
+
+/** 按 run 读全部步骤行（ORDER BY seq 升序；resume 分派与「从最小 seq 继续」共用此读取口径） */
+export async function loadCloseSteps(db: D1Database, runId: number): Promise<CloseStepRow[]> {
+  const result = await db
+    .prepare(
+      `SELECT run_id, step, seq, status, attempt, started_at, finished_at, summary_json, error
+       FROM window_close_steps WHERE run_id = ? ORDER BY seq`,
+    )
+    .bind(runId)
+    .all<CloseStepDbRow>();
+  return result.results.map(toCloseStepRow);
+}
+
+/** 指名步骤是否已 done（未插行 / 非 done 一律 false） */
+export function stepDone(steps: CloseStepRow[], name: string): boolean {
+  return steps.some((s) => s.step === name && s.status === 'done');
+}
+
+/**
+ * 下一个待推进段：done 段跳过，pending/failed 按 seq 取最小者（resume「done 的跳过、
+ * pending/failed 从最小 seq 继续」口径）；全部 done 回 null。入参顺序无关（内部先按 seq 排）。
+ */
+export function nextPendingStep(steps: CloseStepRow[]): CloseStepRow | null {
+  const ordered = [...steps].sort((a, b) => a.seq - b.seq);
+  for (const s of ordered) {
+    if (s.status !== 'done') return s;
+  }
+  return null;
+}
+
+/**
+ * 段成功收口语句（追加进该段提交批的末尾，与该段业务语句同批原子）：step 标 done（attempt+1、
+ * finished_at、error 清空）；带 summary 时同句写入 step 自己的 summary_json（不传 = 不动该列，
+ * finalize 段的完成摘要只落 run.summary_json）。批内任何语句报错 = 整批回滚，step 不会停在
+ * 「业务已提交、step 未标完」的半截态。不带 status<>'done' 守卫（D1 batch changes=0 不中止是
+ * 前提；「不重跑 done 段」由上层纪律与测试锁，不在 SQL 层挡）。
+ */
+export function completeCloseStep(db: D1Database, runId: number, step: string, summary?: unknown): D1PreparedStatement[] {
+  if (summary === undefined) {
+    return [
+      db
+        .prepare(
+          `UPDATE window_close_steps SET status = 'done', attempt = attempt + 1, finished_at = ${NOW_SQL}, error = NULL
+           WHERE run_id = ? AND step = ?`,
+        )
+        .bind(runId, step),
+    ];
+  }
+  return [
+    db
+      .prepare(
+        `UPDATE window_close_steps SET status = 'done', attempt = attempt + 1, finished_at = ${NOW_SQL}, error = NULL, summary_json = ?
+         WHERE run_id = ? AND step = ?`,
+      )
+      .bind(JSON.stringify(summary), runId, step),
+  ];
+}
+
+/**
+ * run.current_step 推进语句（单条，调用方自行并入所在批）：把 current_step 置为指名段。
+ * 推进时点（每段开始前置为该段 / 段提交批尾推进到下一段）由接线批选择，本原语不约束；
+ * 只改 current_step 与 updated_at，不碰 run.status / 租约 / summary_json / error。
+ */
+export function setCloseCurrentStep(db: D1Database, runId: number, step: string): D1PreparedStatement {
+  return db
+    .prepare(`UPDATE window_close_runs SET current_step = ?, updated_at = ${NOW_SQL} WHERE id = ?`)
+    .bind(step, runId);
 }
