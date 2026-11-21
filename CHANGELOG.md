@@ -4,7 +4,7 @@
 
 各版本的裁决、交付清单与验收数字见 [ROADMAP.md](./ROADMAP.md)。
 
-## [v6.88.0] · 关窗持久化阶段机 B1：closing 状态、claim/租约与冻结（2026-11-21，本地未 push）
+## [v6.88.0] · 关窗持久化阶段机 B1+B2：closing/claim/租约/冻结 + 七段拆分与 parity（2026-11-21，本地未 push）
 
 **Added**
 
@@ -25,10 +25,20 @@
 - typecheck 三份全清；vitest **218 文件 / 3385 例全过**（139.5s；v6.87.1 基线 217/3360，本批 +25 例）；build 成功（`index-OOZhcDWI.js` 755.59 kB / gzip 236.93 kB）。
 - 变异 MV-01…MV-08 全部命中并逐字还原（详见测试计划 §9）。
 
-**Notes / 过渡语义（B1 边界）**
+**B2（2026-11-21，同日）：七段拆分 + parity 金样**
 
-- B1 仍是**单 step `close_all`**：payroll/home/loyalty/squad_audit 尚未拆成独立可重放阶段（B2）；通知未走 outbox（B3，`post_close` 失败只记 warnings，允许 at-least-once）；并发/崩溃矩阵在 B4。closing 冻结是整段兜底，不是逐阶段租约。
-- `finalize` 成功后 `post_close` 失败 = 关窗成功 + warnings；run 已完成，不因后置动作失败回滚业务事实。
+- `closeWindow` 从单 step `close_all` 拆为 7 个持久化 step：`preflight`（二次显式窗结算 + promotion/普通谈判强约，计数落 step summary）→ `payroll` → `home` → `loyalty` → `squad_audit` → `finalize`（`closing→closed` + 审计 + finalize done + run completed 同批）→ `post_close`（通知 + 窗尾收口 + 海捞开标，失败只标 step failed + warnings，不改 run completed）。
+- **parity 硬口径**：payroll/home/loyalty/squad_audit 四个 builder 在任何业务段提交之前全部构建完（调用顺序与 B1 一致），再按 step 顺序逐段提交；正常路径与 B1 金样逐字段一致。resume 跳过 done 段、只推进 pending/failed 段；重建后段读到已提交状态属 B4 恢复 parity 范围，已登记。
+- `claimCloseStatements` 一次插 7 行 step（seq 1–7，初始 pending）；`completeCloseStep`/`markCloseStepFailed`/`completeCloseRun` 与 `current_step` 推进同批原子；删除 `CLOSE_STEP_CLOSE_ALL`。
+- 新增 `tests/window-close-parity.test.ts`：常规/临时/中期三组夹具，业务表投影 + 响应体 + run.summary_json 三层 parity；runs/steps 结构改由 `expectB2Structure` 独立断言（7 段/顺序/completed）。
+- `tests/window-close-runs.test.ts` 扩到 29 例：B2-03 preflight 失败、B2-05 home 失败、B2-07 squad_audit 失败、B2-08 finalize 失败 + 清障重放只跑尾段、T17 补 post_close step failed 断言；T04/T05/T05b/T06 改七段语义。
+- 验收：目标套件 128 例全过；全量 **219 文件 / 3392 例全过**（183s）；typecheck 三份清；build 成功（`index-OOZhcDWI.js`，与 B1 同哈希，无 web 改动）。变异 MB2-01/02/04/05/06/07 命中；**MB2-03（home 在 payroll 提交后构建）未命中**——三组 parity 夹具没有余额敏感输出，登记为覆盖缺口（B2-12 richFixture 未落，见测试计划 §10.10）。
+
+**Notes / 过渡语义（B2 边界）**
+
+- 七段已拆，但 `preflight`/`post_close` 的外部动作不在业务批内；通知未走 outbox（B3，`post_close` 失败只记 warnings，允许 at-least-once）；resume 重建后段的 parity 漂移与并发/崩溃矩阵在 B4。closing 冻结仍是整段兜底，不是逐阶段租约。
+- `finalize` 成功后 `post_close` 失败 = 关窗成功 + warnings；run 保持 completed，`post_close` step 留 failed 供管理端补跑。
+- B2-12 richFixture 19 表 parity 与 B2-06 loyalty 失败用例未落，MB2-03 因此未命中；覆盖缺口已在测试计划 §10.10 登记，不冒充全覆盖。
 
 ## [v6.87.1] · 测试补锁批：挂牌缺口 6 例 + 契约源码锁 14 例（2026-11-20，已上线 Version d687506b）
 

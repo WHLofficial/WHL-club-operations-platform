@@ -134,7 +134,7 @@
 
 ---
 
-## v6.88.0 · 关窗持久化阶段机 B1：closing / claim / 租约 / 冻结（2026-11-21，本地未 push）
+## v6.88.0 · 关窗持久化阶段机 B1+B2：closing/claim/租约/冻结 + 七段拆分与 parity（2026-11-21，本地未 push）
 
 **缘起**：D1 `batch()` 的 `meta.changes=0` 是成功结果、不会中止后续语句——现有 `closeWindow` 批后 409「窗口刚被关过了」只是**事后报错**，并发后到者仍会提交工资/主场/忠诚/体检；`naming-ops.ts:1130-1140` 无本窗结算守卫，会多减合同期。用户裁决走 **B 持久化阶段机**，并定：closing 期间冻结全部俱乐部写操作、失败只前进重试、B1 先落 7 段中的单 step 骨架（B2 拆段）。
 
@@ -145,9 +145,15 @@
 - `src/worker/window-machine.ts`：preflight（open 状态下、业务校验前）→ claim → 租约 → 二次结算/强约/builders → 单批 close_all（`closing→closed` + 审计 + 业务语句 + step done + run completed）→ 批后 best-effort（失败只记 warnings）。批内不再用 changes=0 挡并发。`openWindow`/`checkSeasonSettle` 计数改 `IN ('open','closing')`；`settleOverdue`/`settleListingForReview` 加显式窗口回退。
 - `tests/window-close-runs.test.ts` T01–T17（25 例）；`docs/test-plans/v6.88.0-window-close-pipeline.md`。
 
+**B2（同日）· 七段拆分 + parity 金样**：
+- `window-machine.ts` 的 `closeWindow` 拆为 `preflight → payroll → home → loyalty → squad_audit → finalize → post_close` 七个持久化 step；每段业务语句 + step done + `current_step` 推进同批原子；`claimCloseStatements` 一次插 7 行 step。
+- **parity 硬口径**：四个 builder 在任何业务段提交前全部构建完（调用顺序与 B1 一致），再逐段提交；正常路径与 B1 金样逐字段一致。resume 跳过 done 段，重建后段读到已提交状态的漂移归 B4。
+- 新增 `tests/window-close-parity.test.ts`（常规/临时/中期三组，三层 parity）；`window-close-runs.test.ts` 扩到 29 例（B2-03/05/07/08、T17 post_close step failed、T04/T05/T05b/T06 七段语义）。
+- **验收**：全量 **219 文件 / 3392 例全过**（183s）；typecheck 三份清；build 成功（`index-OOZhcDWI.js` 755.59 kB，哈希与 B1 同，无 web 改动）；MB2-01/02/04/05/06/07 命中，MB2-03 未命中（三组夹具无余额敏感输出；B2-12 richFixture 未落），已登记。
+
 **验收**：typecheck 三份全清；vitest **218 文件 / 3385 例全过**（139.5s；+25 例）；build 成功（`index-OOZhcDWI.js` 755.59 kB / gzip 236.93 kB）；MV-01…MV-08 全命中并还原（MV-01 由 T16 覆盖、MV-06 靠补 guardSql 后置观测，详见测试计划 §9）。
 
-**B1 边界（后续批次）**：仍是单 step `close_all`，payroll/home/loyalty/squad_audit 未拆独立可重放阶段（B2）；通知未走 outbox，`post_close` 失败只记 warnings、允许 at-least-once（B3）；并发/崩溃矩阵与租约交错（B4）；closing 冻结是整段兜底，不是逐阶段租约。迁移 `0096` 必须先 apply 再 push（CF Workers Builds 无迁移步骤）。
+**B2 边界（后续批次）**：通知未走 outbox（B3）；resume 重建后段 parity、并发/崩溃矩阵与租约交错在 B4；B2-06 loyalty 失败与 B2-12 richFixture 未落，测试矩阵缺口已在测试计划 §10.10 登记。迁移 `0096` 必须先 apply 再 push（CF Workers Builds 无迁移步骤）。
 
 ## v6.87.1 · 测试补锁批：挂牌缺口与契约源码锁（2026-11-20，已上线 Version d687506b）
 
